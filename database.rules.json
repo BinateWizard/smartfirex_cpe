@@ -1,11 +1,10 @@
 {
   "rules": {
-    ".read": "auth != null",
-    ".write": "auth != null",
     "devices": {
       "$deviceId": {
         ".read": "auth != null",
         ".write": "auth != null",
+        ".validate": "newData.hasChildren(['timestamp']) || newData.hasChildren(['lastSeen'])",
         "readings": {
           ".read": "auth != null",
           ".write": "auth != null"

@@ -2,17 +2,22 @@
   <div class="app-container">
     <!-- Header -->
     <div class="header">
-      <div class="header-content">
-        <button class="back-btn" @click="$router.back()" aria-label="Back">
-          <ChevronLeft class="back-icon" />
-        </button>
-        <h1 class="header-title">Event History</h1>
-      </div>
+      <button class="back-btn" @click="$router.back()" aria-label="Back">
+        <ChevronLeft class="back-icon" />
+      </button>
+      <h1 class="header-title">Notifications</h1>
     </div>
 
     <div class="event-list">
-      <div v-if="loading" class="empty">Loading events…</div>
-      <div v-else-if="events.length === 0" class="empty">No notifications yet</div>
+      <div v-if="loading" class="empty-state">
+        <div class="empty-icon">⏳</div>
+        <div class="empty-text">Loading events…</div>
+      </div>
+      <div v-else-if="events.length === 0" class="empty-state">
+        <div class="empty-icon">🔔</div>
+        <div class="empty-title">No notifications yet</div>
+        <div class="empty-subtitle">You'll see alerts and events from your devices here</div>
+      </div>
 
       <div v-else class="event-items">
         <div v-for="e in events" :key="e.id" class="event-card" :class="{ detailed: e.type !== 'safe' }">
@@ -47,9 +52,9 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { ChevronLeft, Check, AlertTriangle, Bell } from 'lucide-vue-next'
-import { collection, getDocs, doc, getDoc } from 'firebase/firestore'
+import { collection, getDocs, doc, getDoc, query, where } from 'firebase/firestore'
 import { ref as dbRef, onValue } from 'firebase/database'
-import { db, rtdb } from '@/firebase'
+import { db, rtdb, auth } from '@/firebase'
 
 const loading = ref(true)
 const events = ref([])
@@ -88,8 +93,18 @@ async function buildListeners() {
   detachFns.forEach(off => off())
   detachFns = []
 
-  // Get devices registry
-  const snap = await getDocs(collection(db, 'devices'))
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    loading.value = false;
+    return;
+  }
+
+  // Get devices registry - only user's devices
+  const q = query(
+    collection(db, 'devices'),
+    where('addedBy', '==', currentUser.uid)
+  );
+  const snap = await getDocs(q);
   const docs = snap.docs
   if (docs.length === 0) {
     loading.value = false
@@ -98,16 +113,17 @@ async function buildListeners() {
 
   // For each device, read metadata (name) and subscribe to readings + current node
   for (const d of docs) {
-    const id = d.id
-    let name = d.data().name || id
+    const docId = d.id
+    const deviceId = d.data().deviceId
+    let name = d.data().name || deviceId
     try {
       // refresh name from Firestore doc (in case)
-      const meta = await getDoc(doc(db, 'devices', id))
+      const meta = await getDoc(doc(db, 'devices', docId))
       if (meta.exists()) name = meta.data().name || name
     } catch {}
 
     // Listen to current snapshot
-    const curRef = dbRef(rtdb, `devices/${id}`)
+    const curRef = dbRef(rtdb, `devices/${deviceId}`)
     const offCur = onValue(curRef, (s) => {
       const val = s.val()
       if (!val) return
@@ -116,8 +132,8 @@ async function buildListeners() {
       // Only push non-safe items as notifications
       if (cls.type !== 'safe') {
         events.value.unshift({
-          id: `${id}-current-${dt.getTime()}`,
-          deviceId: id,
+          id: `${deviceId}-current-${dt.getTime()}`,
+          deviceId: deviceId,
           deviceName: name,
           dateTime: dt,
           temperature: val.temperature,
@@ -134,7 +150,7 @@ async function buildListeners() {
     detachFns.push(() => offCur())
 
     // Listen to history if exists
-    const histRef = dbRef(rtdb, `devices/${id}/readings`)
+    const histRef = dbRef(rtdb, `devices/${deviceId}/readings`)
     const offHist = onValue(histRef, (s) => {
       const obj = s.val()
       if (!obj) return
@@ -142,8 +158,8 @@ async function buildListeners() {
         const dt = v.timestamp ? new Date(v.timestamp) : new Date()
         const cls = classify(v)
         return {
-          id: `${id}-hist-${key}`,
-          deviceId: id,
+          id: `${deviceId}-hist-${key}`,
+          deviceId: deviceId,
           deviceName: name,
           dateTime: dt,
           temperature: v.temperature,
@@ -178,45 +194,97 @@ onUnmounted(() => {
 .app-container {
   max-width: 400px;
   margin: 0 auto;
-  background-color: #f5f5f5;
+  background-color: #fffaf0;
   min-height: 100vh;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
 .header {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 400px;
+  width: 100%;
   background-color: #dc2626;
-  height: 80px;
-  display: flex;
-  align-items: flex-end;
-  padding-bottom: 16px;
-}
-
-.header-content {
+  height: 60px;
   display: flex;
   align-items: center;
   padding: 0 16px;
+  gap: 12px;
+  z-index: 100;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.back-btn {
+  background: none;
+  border: none;
   color: white;
+  cursor: pointer;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  transition: background 0.2s;
+}
+
+.back-btn:active {
+  background: rgba(255, 255, 255, 0.15);
 }
 
 .back-icon {
   width: 24px;
   height: 24px;
-  margin-right: 8px;
-  cursor: pointer;
 }
 
 .header-title {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
   margin: 0;
+  color: white;
 }
 
 .event-list {
-  padding: 16px;
+  padding: 76px 16px 100px 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding-bottom: 100px;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+}
+
+.empty-icon {
+  font-size: 64px;
+  margin-bottom: 16px;
+  opacity: 0.6;
+}
+
+.empty-text {
+  font-size: 16px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.empty-title {
+  font-size: 18px;
+  color: #374151;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.empty-subtitle {
+  font-size: 14px;
+  color: #9ca3af;
+  max-width: 300px;
+  line-height: 1.5;
 }
 
 .event-card {

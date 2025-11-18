@@ -1,9 +1,22 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Devices collection - accessible by all authenticated users
-    match /devices/{deviceId} {
-      allow read, write: if request.auth != null;
+    // Devices collection - users can only read/write their own devices
+    // Document ID format: {userId}_{deviceId}
+    match /devices/{deviceDocId} {
+      // Allow read if document ID starts with user's UID OR if querying with addedBy filter
+      allow read: if request.auth != null && 
+        (deviceDocId.matches('^' + request.auth.uid + '_.*') || 
+         resource.data.addedBy == request.auth.uid);
+      
+      // Allow create/update if document ID starts with user's UID
+      allow create, update: if request.auth != null && 
+        deviceDocId.matches('^' + request.auth.uid + '_.*') &&
+        request.resource.data.addedBy == request.auth.uid;
+      
+      // Allow delete if document ID starts with user's UID
+      allow delete: if request.auth != null && 
+        deviceDocId.matches('^' + request.auth.uid + '_.*');
     }
     
     // Users collection (if needed for user profiles)

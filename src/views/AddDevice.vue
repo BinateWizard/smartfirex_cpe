@@ -84,6 +84,16 @@
         </ul>
       </div>
     </div>
+
+    <!-- Error Modal -->
+    <div v-if="showErrorModal" class="modal-overlay" @click="showErrorModal = false">
+      <div class="modal-content" @click.stop>
+        <div class="modal-icon">⚠️</div>
+        <h3 class="modal-title">Device Not Found</h3>
+        <p class="modal-message">{{ errorModalMessage }}</p>
+        <button @click="showErrorModal = false" class="modal-btn">OK</button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -107,6 +117,8 @@ const formData = ref({
 const isSubmitting = ref(false);
 const error = ref('');
 const success = ref(false);
+const showErrorModal = ref(false);
+const errorModalMessage = ref('');
 
 async function handleSubmit() {
   error.value = '';
@@ -122,12 +134,22 @@ async function handleSubmit() {
       return;
     }
 
-    // Check if device already exists in Firestore
-    const deviceRef = doc(db, 'devices', deviceId);
-    const docSnap = await getDoc(deviceRef);
+    // Get current user
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      error.value = 'You must be logged in to add devices';
+      isSubmitting.value = false;
+      return;
+    }
+
+    // Check if THIS USER already added this device
+    const userDeviceRef = doc(db, 'devices', `${currentUser.uid}_${deviceId}`);
+    const docSnap = await getDoc(userDeviceRef);
+
+    console.log('📝 Checking document ID:', `${currentUser.uid}_${deviceId}`);
 
     if (docSnap.exists()) {
-      error.value = 'This device ID is already registered';
+      error.value = 'You have already registered this device';
       isSubmitting.value = false;
       return;
     }
@@ -137,30 +159,30 @@ async function handleSubmit() {
     const rtdbSnapshot = await get(rtdbDeviceRef);
     
     if (!rtdbSnapshot.exists()) {
-      error.value = `Device "${deviceId}" not found in Realtime Database. Make sure your ESP32 is online and sending data with this Device ID.`;
+      errorModalMessage.value = `Device "${deviceId}" doesn't exist in active devices. If this is a mistake, please contact the administrator.`;
+      showErrorModal.value = true;
       isSubmitting.value = false;
       return;
     }
 
     console.log('✅ Device found in RTDB:', rtdbSnapshot.val());
 
-    // Get current user (optional - for tracking who added it)
-    const currentUser = auth.currentUser;
-
-    // Add device to Firestore - accessible by all authenticated users
-    await setDoc(deviceRef, {
+    // Add device to Firestore with user-specific document ID
+    console.log('💾 Saving to Firestore with composite ID:', `${currentUser.uid}_${deviceId}`);
+    
+    await setDoc(userDeviceRef, {
       deviceId: deviceId,
       name: formData.value.name.trim() || deviceId,
       location: formData.value.location.trim() || '',
       description: formData.value.description.trim() || '',
       status: 'Safe',
-      addedBy: currentUser ? currentUser.uid : 'unknown',
-      addedByEmail: currentUser ? currentUser.email : 'unknown',
+      addedBy: currentUser.uid,
+      addedByEmail: currentUser.email || 'unknown',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
 
-    console.log('✅ Device added:', deviceId);
+    console.log('✅ Device added successfully to Firestore!');
     success.value = true;
 
     // Redirect to home after 1.5 seconds
@@ -186,6 +208,10 @@ async function handleSubmit() {
   display: flex;
   flex-direction: column;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 .header {
@@ -220,21 +246,21 @@ async function handleSubmit() {
 }
 
 .main-content {
-  padding: 24px 20px;
-  padding-bottom: 88px;
+  padding: 20px 16px;
+  padding-bottom: 40px;
   flex: 1;
 }
 
 .form-card {
   background: white;
   border-radius: 12px;
-  padding: 24px;
+  padding: 20px 16px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .form-group {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .form-group label {
@@ -254,6 +280,7 @@ async function handleSubmit() {
   font-size: 15px;
   font-family: inherit;
   transition: border-color 0.2s;
+  box-sizing: border-box;
 }
 
 .form-group input:focus,
@@ -276,7 +303,7 @@ async function handleSubmit() {
 .form-actions {
   display: flex;
   gap: 12px;
-  margin-top: 24px;
+  margin-top: 20px;
 }
 
 .btn-primary,
@@ -335,7 +362,7 @@ async function handleSubmit() {
 .info-card {
   background: #f0f9ff;
   border-radius: 12px;
-  padding: 20px;
+  padding: 16px;
   border: 1px solid #bae6fd;
 }
 
@@ -361,5 +388,83 @@ async function handleSubmit() {
   font-size: 14px;
   color: #0369a1;
   margin-bottom: 4px;
+}
+
+/* Error Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal-content {
+  background: white;
+  border-radius: 16px;
+  padding: 32px 24px;
+  max-width: 320px;
+  width: 90%;
+  text-align: center;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  animation: slideUp 0.3s;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.modal-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.modal-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 12px 0;
+}
+
+.modal-message {
+  font-size: 15px;
+  color: #6b7280;
+  line-height: 1.6;
+  margin: 0 0 24px 0;
+}
+
+.modal-btn {
+  width: 100%;
+  padding: 12px;
+  background-color: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.modal-btn:hover {
+  background-color: #b91c1c;
 }
 </style>
