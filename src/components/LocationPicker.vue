@@ -28,6 +28,11 @@
             <span class="info-label">Longitude:</span>
             <span class="info-value">{{ selectedLocation.lng.toFixed(6) }}</span>
           </div>
+          <div v-if="locationAccuracy !== null" class="info-row">
+            <span class="info-label">Accuracy:</span>
+            <span class="info-value">~{{ Math.round(locationAccuracy) }} m</span>
+          </div>
+          <div v-if="locationWarning" class="accuracy-warning">{{ locationWarning }}</div>
         </div>
       </div>
       
@@ -53,6 +58,9 @@ let map = null
 let marker = null
 const selectedLocation = ref(null)
 const gettingLocation = ref(false)
+const locationAccuracy = ref(null)
+const locationWarning = ref(null)
+let accuracyWatchId = null
 
 function close() {
   emit('close')
@@ -71,31 +79,77 @@ function confirmLocation() {
 
 function useMyLocation() {
   gettingLocation.value = true
-  
-  if ('geolocation' in navigator) {
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const lat = position.coords.latitude
-        const lng = position.coords.longitude
-        
-        setLocation(lat, lng)
-        map.setView([lat, lng], 16)
-        gettingLocation.value = false
-      },
-      (error) => {
-        console.error('Geolocation error:', error)
-        alert('Unable to get your location. Please click on the map to set location.')
-        gettingLocation.value = false
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 5000,
-        maximumAge: 0
-      }
-    )
-  } else {
-    alert('Geolocation is not supported by your browser')
+  locationWarning.value = null
+  locationAccuracy.value = null
+
+  if (!('geolocation' in navigator)) {
+    alert('Geolocation not supported. Please select manually on map.')
     gettingLocation.value = false
+    return
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      const { latitude: lat, longitude: lng, accuracy } = position.coords
+      locationAccuracy.value = accuracy
+      evaluateAccuracyWarning(accuracy)
+      setLocation(lat, lng)
+      map.setView([lat, lng], 16)
+      gettingLocation.value = false
+      startAccuracyWatch()
+    },
+    (error) => {
+      console.error('Geolocation error (getCurrentPosition):', error)
+      alert('Unable to get precise location. Please tap on the map to set location.')
+      gettingLocation.value = false
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0
+    }
+  )
+}
+
+function startAccuracyWatch() {
+  if (accuracyWatchId !== null) {
+    navigator.geolocation.clearWatch(accuracyWatchId)
+    accuracyWatchId = null
+  }
+  let start = Date.now()
+  accuracyWatchId = navigator.geolocation.watchPosition(
+    (position) => {
+      const { latitude: lat, longitude: lng, accuracy } = position.coords
+      if (locationAccuracy.value === null || accuracy < locationAccuracy.value - 50) {
+        locationAccuracy.value = accuracy
+        evaluateAccuracyWarning(accuracy)
+        setLocation(lat, lng)
+      }
+      if (accuracy < 150 || Date.now() - start > 10000) {
+        navigator.geolocation.clearWatch(accuracyWatchId)
+        accuracyWatchId = null
+      }
+    },
+    () => {
+      if (accuracyWatchId !== null) {
+        navigator.geolocation.clearWatch(accuracyWatchId)
+        accuracyWatchId = null
+      }
+    },
+    { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+  )
+}
+
+function evaluateAccuracyWarning(acc) {
+  if (acc === null) return
+  if (acc > 5000) {
+    locationWarning.value = 'Low accuracy (IP-based). Pin may default to NCR. Zoom map and tap exact spot.'
+  } else if (acc > 1500) {
+    locationWarning.value = 'Coarse accuracy. Consider waiting or moving for GPS lock.'
+  } else if (acc > 200) {
+    locationWarning.value = 'Moderate accuracy. Acceptable, but you can refine by tapping map.'
+  } else {
+    locationWarning.value = null
   }
 }
 
@@ -132,76 +186,97 @@ function setLocation(lat, lng) {
 onMounted(() => {
   console.log('🗺️ Initializing location picker map')
   
-  // Small delay to ensure DOM is ready
-  setTimeout(() => {
-    // Initialize map centered on NCR Philippines as fallback
-    map = L.map('location-picker-map', {
-      cursor: 'crosshair'
-    }).setView([14.5995, 120.9842], 13)
-    
-    // Add tile layer
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors',
-      maxZoom: 19
-    }).addTo(map)
-    
-    // Force map to recalculate size after render
-    setTimeout(() => {
-      map.invalidateSize()
-      console.log('🔄 Map size invalidated and refreshed')
-    }, 100)
-    
-    // Change cursor style to indicate clickable
-    const mapContainer = document.getElementById('location-picker-map')
-    if (mapContainer) {
-      mapContainer.style.cursor = 'crosshair'
-      console.log('✅ Cursor style set to crosshair')
-    }
-    
-    // Add click handler to map
-    map.on('click', (e) => {
-      console.log('🖱️ Map clicked at:', e.latlng)
-      setLocation(e.latlng.lat, e.latlng.lng)
-    })
-    
-    console.log('✅ Map initialized and click handler attached')
-    
-    // Try to get user's location and center map
-    if ('geolocation' in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const lat = position.coords.latitude
-          const lng = position.coords.longitude
-          console.log('📍 Centering map on user location:', lat, lng)
-          map.setView([lat, lng], 16)
-        },
-        (error) => {
-          console.warn('⚠️ Could not get user location, using NCR fallback:', error.message)
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 5000,
-          maximumAge: 0
-        }
-      )
-    }
-  }, 50)
-  
-  console.log('✅ Map initialized and click handler attached')
-  
-  // Try to get user's location on mount
+  // Get device location FIRST, then initialize map centered on it
   if ('geolocation' in navigator) {
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        const lat = position.coords.latitude
-        const lng = position.coords.longitude
-        map.setView([lat, lng], 16)
+        const { latitude: lat, longitude: lng, accuracy } = position.coords
+        console.log('📍 Got device location:', lat, lng, 'accuracy:', accuracy)
+        locationAccuracy.value = accuracy
+        evaluateAccuracyWarning(accuracy)
+        
+        // Initialize map centered on ACTUAL location
+        setTimeout(() => {
+          map = L.map('location-picker-map', {
+            cursor: 'crosshair'
+          }).setView([lat, lng], 16)
+          
+          // Add tile layer
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 19
+          }).addTo(map)
+          
+          // Force map to recalculate size after render
+          setTimeout(() => {
+            map.invalidateSize()
+            console.log('🔄 Map size invalidated and refreshed')
+          }, 100)
+          
+          // Change cursor style to indicate clickable
+          const mapContainer = document.getElementById('location-picker-map')
+          if (mapContainer) {
+            mapContainer.style.cursor = 'crosshair'
+          }
+          
+          // Add click handler to map
+          map.on('click', (e) => {
+            console.log('🖱️ Map clicked at:', e.latlng)
+            setLocation(e.latlng.lat, e.latlng.lng)
+          })
+          
+          // Auto-set location to device position
+          setLocation(lat, lng)
+          
+          console.log('✅ Map initialized at device location')
+        }, 50)
       },
-      () => {
-        // Silently fail, keep default view
+      (error) => {
+        console.error('❌ Geolocation error:', error)
+        // Fallback to NCR if location denied
+        setTimeout(() => {
+          map = L.map('location-picker-map', {
+            cursor: 'crosshair'
+          }).setView([14.5995, 120.9842], 13)
+          
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 19
+          }).addTo(map)
+          
+          setTimeout(() => map.invalidateSize(), 100)
+          
+          map.on('click', (e) => {
+            setLocation(e.latlng.lat, e.latlng.lng)
+          })
+          
+          console.log('⚠️ Map initialized at NCR fallback')
+        }, 50)
       },
-      { timeout: 3000 }
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
+      }
     )
+  } else {
+    // No geolocation support, use NCR fallback
+    setTimeout(() => {
+      map = L.map('location-picker-map', {
+        cursor: 'crosshair'
+      }).setView([14.5995, 120.9842], 13)
+      
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 19
+      }).addTo(map)
+      
+      setTimeout(() => map.invalidateSize(), 100)
+      
+      map.on('click', (e) => {
+        setLocation(e.latlng.lat, e.latlng.lng)
+      })
+    }, 50)
   }
 })
 
@@ -361,6 +436,17 @@ onUnmounted(() => {
   color: #6b7280;
   font-size: 14px;
   flex: 1;
+}
+
+.accuracy-warning {
+  margin-top: 8px;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  color: #92400e;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .modal-footer {
