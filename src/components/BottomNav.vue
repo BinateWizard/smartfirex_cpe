@@ -50,9 +50,9 @@
 import { useRoute } from 'vue-router'
 import { Bell, MapPin, Settings } from 'lucide-vue-next'
 import { ref, onMounted, onUnmounted } from 'vue'
-import { collection, getDocs } from 'firebase/firestore'
+import { collection, getDocs, query, where } from 'firebase/firestore'
 import { ref as dbRef, onValue } from 'firebase/database'
-import { db, rtdb } from '@/firebase'
+import { db, rtdb, auth } from '@/firebase'
 
 const route = useRoute()
 
@@ -69,9 +69,19 @@ function determineStatus(data) {
 }
 
 async function watchDevicesForAlerts() {
-  // Get registered devices from Firestore
-  const snap = await getDocs(collection(db, 'devices'))
-  const devices = snap.docs.map(d => d.id)
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    unreadCount.value = 0;
+    return;
+  }
+
+  // Get registered devices from Firestore - only user's devices
+  const q = query(
+    collection(db, 'devices'),
+    where('addedBy', '==', currentUser.uid)
+  );
+  const snap = await getDocs(q);
+  const devices = snap.docs.map(d => d.data().deviceId);
 
   // Clean previous listeners
   detachFns.forEach(off => off())
@@ -85,23 +95,23 @@ async function watchDevicesForAlerts() {
   // Track number of devices currently in Alert status
   const alertState = new Map()
 
-  devices.forEach(id => {
-    const refPath = dbRef(rtdb, `devices/${id}`)
+  devices.forEach(deviceId => {
+    const refPath = dbRef(rtdb, `devices/${deviceId}`)
     const off = onValue(refPath, (snap) => {
       const data = snap.val()
       const status = determineStatus(data)
-      const wasAlert = alertState.get(id) === true
+      const wasAlert = alertState.get(deviceId) === true
       const isAlert = status === 'Alert'
       if (wasAlert !== isAlert) {
-        alertState.set(id, isAlert)
+        alertState.set(deviceId, isAlert)
         unreadCount.value = Array.from(alertState.values()).filter(Boolean).length
-      } else if (!alertState.has(id)) {
-        alertState.set(id, isAlert)
+      } else if (!alertState.has(deviceId)) {
+        alertState.set(deviceId, isAlert)
         unreadCount.value = Array.from(alertState.values()).filter(Boolean).length
       }
     }, (e) => {
       // On error, consider device not alerting
-      alertState.set(id, false)
+      alertState.set(deviceId, false)
       unreadCount.value = Array.from(alertState.values()).filter(Boolean).length
     })
     detachFns.push(() => off())

@@ -42,9 +42,9 @@
 
 <script setup>
 import { ref } from 'vue'
-import { collection, getDocs } from 'firebase/firestore'
+import { collection, getDocs, query, where } from 'firebase/firestore'
 import { ref as dbRef, get } from 'firebase/database'
-import { db, rtdb } from '@/firebase'
+import { db, rtdb, auth } from '@/firebase'
 
 const testDeviceId = ref('DEVICE_001')
 const checking = ref(false)
@@ -85,10 +85,20 @@ async function checkDevice() {
 
 async function loadDevices() {
   try {
-    const snap = await getDocs(collection(db, 'devices'))
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      devices.value = [];
+      return;
+    }
+
+    const q = query(
+      collection(db, 'devices'),
+      where('addedBy', '==', currentUser.uid)
+    );
+    const snap = await getDocs(q);
     devices.value = snap.docs.map(d => ({
-      id: d.id,
-      name: d.data().name || d.id
+      id: d.data().deviceId,
+      name: d.data().name || d.data().deviceId
     }))
   } catch (error) {
     console.error('Error loading devices:', error)

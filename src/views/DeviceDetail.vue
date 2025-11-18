@@ -9,6 +9,31 @@
       <h1 class="header-title">{{ deviceName }}</h1>
     </div>
 
+    <!-- Tab Navigation -->
+    <div class="tab-nav">
+      <button 
+        class="tab-btn" 
+        :class="{ active: activeTab === 'overview' }"
+        @click="activeTab = 'overview'"
+      >
+        Overview
+      </button>
+      <button 
+        class="tab-btn" 
+        :class="{ active: activeTab === 'statistics' }"
+        @click="activeTab = 'statistics'"
+      >
+        Statistics
+      </button>
+      <button 
+        class="tab-btn" 
+        :class="{ active: activeTab === 'info' }"
+        @click="activeTab = 'info'"
+      >
+        Info
+      </button>
+    </div>
+
     <!-- Main Content -->
     <div class="main-content">
       <!-- Loading State -->
@@ -17,16 +42,80 @@
         <div class="loading-text">Connecting to device...</div>
       </div>
 
-      <!-- No Data State -->
-      <div v-else-if="noData" class="no-data-section">
+      <!-- Offline Modal -->
+      <div v-if="noData && showOfflineModal" class="modal-overlay" @click.self="showOfflineModal = false">
+        <div class="offline-modal">
+          <div class="offline-modal-header">
+            <h2>📡 Device Offline</h2>
+            <button class="close-modal-btn" @click="showOfflineModal = false">✕</button>
+          </div>
+          
+          <div class="offline-modal-content">
+            <div class="offline-info-card">
+              <h3>🔍 Diagnostics</h3>
+              <div class="diagnostic-item">
+                <span class="diagnostic-label">Device ID:</span>
+                <span class="diagnostic-value">{{ deviceId }}</span>
+              </div>
+              <div class="diagnostic-item">
+                <span class="diagnostic-label">Device Name:</span>
+                <span class="diagnostic-value">{{ deviceName }}</span>
+              </div>
+              <div class="diagnostic-item" v-if="deviceLocation">
+                <span class="diagnostic-label">Location:</span>
+                <span class="diagnostic-value">{{ deviceLocation }}</span>
+              </div>
+              <div class="diagnostic-item">
+                <span class="diagnostic-label">Status:</span>
+                <span class="diagnostic-value offline-status">Offline</span>
+              </div>
+              <div class="diagnostic-item">
+                <span class="diagnostic-label">RTDB Path:</span>
+                <span class="diagnostic-value">/devices/{{ deviceId }}</span>
+              </div>
+            </div>
+
+            <div class="offline-info-card">
+              <h3>⚠️ Troubleshooting</h3>
+              <ul class="troubleshooting-list">
+                <li>Check if the ESP32 device is powered on</li>
+                <li>Verify WiFi connection on the device</li>
+                <li>Ensure Firebase RTDB credentials are correct</li>
+                <li>Check device firmware is running properly</li>
+                <li>View RTDB console to verify data is being sent</li>
+              </ul>
+            </div>
+
+            <div class="offline-actions">
+              <button class="action-btn-modal" @click="router.push('/')">
+                ← Back to Home
+              </button>
+              <button class="action-btn-modal warning" @click="confirmDisconnect">
+                🔌 Disconnect Device
+              </button>
+              <button class="action-btn-modal danger" @click="confirmDelete">
+                🗑️ Delete Everything
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- No Data State (shows modal button) -->
+      <div v-else-if="noData && activeTab === 'overview'" class="no-data-section">
         <div class="no-data-icon">📡</div>
         <div class="no-data-title">Device Offline</div>
         <div class="no-data-text">{{ deviceName }} is not sending data to Realtime Database.</div>
-        <div class="no-data-hint">Check: /devices/{{ deviceId }}</div>
+        <button class="diagnostics-btn" @click="showOfflineModal = true">
+          🔍 View Diagnostics
+        </button>
       </div>
 
       <!-- Device Dashboard (when data available) -->
-      <div v-else :key="deviceId">
+      <div v-else-if="!noData" :key="deviceId">
+
+      <!-- OVERVIEW TAB -->
+      <div v-if="activeTab === 'overview'">
       <!-- Status Circle -->
       <div class="status-section" v-if="latest && typeof latest === 'object' && latest.status">
         <div class="status-circle" :class="{ 'alert-circle': latest.status === 'Alert' }">
@@ -94,6 +183,213 @@
 
       <showMap v-if="showMapModal" @close="closeMap" />
 
+      <!-- Current Readings Section -->
+      <div class="current-readings-section" v-if="latest">
+        <h2 class="section-title">📊 CURRENT READINGS</h2>
+        
+        <div class="readings-grid">
+          <div class="reading-card">
+            <div class="reading-icon">🌡️</div>
+            <div class="reading-value">{{ latest.temperature || 'N/A' }}°C</div>
+            <div class="reading-label">Temperature</div>
+          </div>
+
+          <div class="reading-card">
+            <div class="reading-icon">💧</div>
+            <div class="reading-value">{{ latest.humidity || 'N/A' }}%</div>
+            <div class="reading-label">Humidity</div>
+          </div>
+
+          <div class="reading-card">
+            <div class="reading-icon">💨</div>
+            <div class="reading-value" :style="{ color: getSmokeColor(smokePercentage) }">{{ smokePercentage }}%</div>
+            <div class="reading-label">Smoke Level</div>
+          </div>
+
+          <div class="reading-card">
+            <div class="reading-icon">🔥</div>
+            <div class="reading-value" :class="latest.gasStatus !== 'normal' ? 'text-alert' : 'text-safe'">{{ latest.gasStatus || 'normal' }}</div>
+            <div class="reading-label">Gas Status</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Actions -->
+      <div class="quick-actions" v-if="latest">
+        <button class="action-btn" @click="showMapModal = true">
+          <MapPin :size="20" />
+          View on Map
+        </button>
+        <button class="action-btn" @click="activeTab = 'statistics'">
+          📈 View Statistics
+        </button>
+      </div>
+
+      </div>
+      <!-- END OVERVIEW TAB -->
+
+      <!-- STATISTICS TAB (available even when offline if history exists) -->
+      <div v-if="activeTab === 'statistics'">
+        <!-- Time Range Filter -->
+        <div class="time-range-filter">
+          <button 
+            class="range-btn" 
+            :class="{ active: timeRange === 'week' }"
+            @click="changeTimeRange('week')"
+          >
+            Week
+          </button>
+          <button 
+            class="range-btn" 
+            :class="{ active: timeRange === 'month' }"
+            @click="changeTimeRange('month')"
+          >
+            Month
+          </button>
+          <button 
+            class="range-btn" 
+            :class="{ active: timeRange === 'year' }"
+            @click="changeTimeRange('year')"
+          >
+            Year
+          </button>
+        </div>
+
+        <!-- Charts -->
+        <div class="charts-section" v-if="filteredHistory.length > 0">
+          <h2 class="section-title">📊 SENSOR TRENDS ({{ timeRangeLabel }})</h2>
+          
+          <div class="chart-card">
+            <h3 class="chart-title">Temperature (°C)</h3>
+            <div class="chart-container">
+              <canvas ref="tempChart"></canvas>
+            </div>
+            <div class="chart-stats">
+              <span class="stat-item">Peak: {{ tempPeak }}°C</span>
+              <span class="stat-item">Avg: {{ tempAvg }}°C</span>
+              <span class="stat-item">Low: {{ tempMin }}°C</span>
+            </div>
+          </div>
+
+          <div class="chart-card">
+            <h3 class="chart-title">Humidity (%)</h3>
+            <div class="chart-container">
+              <canvas ref="humidityChart"></canvas>
+            </div>
+            <div class="chart-stats">
+              <span class="stat-item">Peak: {{ humidityPeak }}%</span>
+              <span class="stat-item">Avg: {{ humidityAvg }}%</span>
+              <span class="stat-item">Low: {{ humidityMin }}%</span>
+            </div>
+          </div>
+
+          <div class="chart-card">
+            <h3 class="chart-title">Smoke Level</h3>
+            <div class="chart-container">
+              <canvas ref="smokeChart"></canvas>
+            </div>
+            <div class="chart-stats">
+              <span class="stat-item">Peak: {{ smokePeak }}%</span>
+              <span class="stat-item">Avg: {{ smokeAvg }}%</span>
+            </div>
+          </div>
+        </div>
+
+        <div v-else class="no-data-message">
+          <p>No data available for the selected time range</p>
+        </div>
+      </div>
+      <!-- END STATISTICS TAB -->
+
+      <!-- INFO TAB -->
+      <div v-if="activeTab === 'info'">
+        <div class="info-section">
+          <h2 class="section-title">📝 DEVICE INFORMATION</h2>
+          
+          <div class="info-card">
+            <div class="info-row">
+              <span class="info-label">Device ID:</span>
+              <span class="info-value">{{ deviceId }}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Device Name:</span>
+              <span class="info-value">{{ deviceName }}</span>
+            </div>
+            <div class="info-row" v-if="deviceLocation">
+              <span class="info-label">Location:</span>
+              <span class="info-value">{{ deviceLocation }}</span>
+            </div>
+            <div class="info-row" v-if="deviceInfo.description">
+              <span class="info-label">Description:</span>
+              <span class="info-value">{{ deviceInfo.description }}</span>
+            </div>
+            <div class="info-row" v-if="deviceInfo.addedByEmail">
+              <span class="info-label">Added By:</span>
+              <span class="info-value">{{ deviceInfo.addedByEmail }}</span>
+            </div>
+            <div class="info-row" v-if="deviceInfo.createdAt">
+              <span class="info-label">Date Added:</span>
+              <span class="info-value">{{ formatDate(deviceInfo.createdAt.toDate()) }}</span>
+            </div>
+            <div class="info-row" v-if="latest">
+              <span class="info-label">Last Updated:</span>
+              <span class="info-value">{{ formatTime(latest.dateTime) }}, {{ formatDate(latest.dateTime) }}</span>
+            </div>
+          </div>
+
+          <h2 class="section-title" style="margin-top: 24px;">📈 CURRENT READINGS</h2>
+          <div class="info-card" v-if="latest">
+            <div class="info-row">
+              <span class="info-label">Status:</span>
+              <span class="info-value" :class="latest.status === 'Alert' ? 'text-alert' : 'text-safe'">{{ latest.status }}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Temperature:</span>
+              <span class="info-value">{{ latest.temperature || 'N/A' }}°C</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Humidity:</span>
+              <span class="info-value">{{ latest.humidity || 'N/A' }}%</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Smoke Level:</span>
+              <span class="info-value">{{ smokePercentage }}%</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Gas Status:</span>
+              <span class="info-value" :class="latest.gasStatus !== 'normal' ? 'text-alert' : 'text-safe'">{{ latest.gasStatus || 'normal' }}</span>
+            </div>
+          </div>
+          <div v-else class="info-card">
+            <p class="no-data-message">Device is currently offline. No current readings available.</p>
+          </div>
+
+          <!-- Device Management Buttons -->
+          <div class="danger-zone">
+            <h3 class="danger-title">⚠️ Device Management</h3>
+            
+            <!-- Disconnect Section -->
+            <div class="management-section">
+              <h4 class="management-subtitle">🔌 Disconnect Device</h4>
+              <p class="management-description">Remove this device from your account. Device data remains in Realtime Database and can be re-added later.</p>
+              <button class="management-btn disconnect-btn" @click="confirmDisconnect">
+                🔌 Disconnect from Account
+              </button>
+            </div>
+
+            <!-- Delete Section -->
+            <div class="management-section">
+              <h4 class="management-subtitle">🗑️ Delete Everything</h4>
+              <p class="management-description">Permanently delete this device from your account AND all sensor data from Realtime Database. This cannot be undone.</p>
+              <button class="management-btn delete-btn" @click="confirmDelete">
+                🗑️ Delete Device & Data
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- END INFO TAB -->
+
       <!-- Recent Status History -->
       <div class="history-section">
         <h2 class="history-title">RECENT STATUS HISTORY</h2>
@@ -158,11 +454,12 @@
 
 <script setup>
 import showMap from "@/components/showMap.vue";
-import { ref, onMounted, onUnmounted, computed } from "vue";
+import { ref, onMounted, onUnmounted, computed, nextTick, watch } from "vue";
 import { useRoute } from "vue-router";
-import { doc, getDoc } from "firebase/firestore";
-import { ref as dbRef, onValue, query, orderByChild, limitToLast } from "firebase/database";
-import { db, rtdb } from "@/firebase";
+import { useRouter } from "vue-router";
+import { doc, getDoc, deleteDoc } from "firebase/firestore";
+import { ref as dbRef, onValue, query, orderByChild, limitToLast, remove } from "firebase/database";
+import { db, rtdb, auth } from "@/firebase";
 import { 
   Bell, 
   MapPin, 
@@ -170,21 +467,236 @@ import {
   AlertTriangle,
   ChevronLeft
 } from 'lucide-vue-next'
+import {
+  Chart,
+  LineController,
+  LineElement,
+  PointElement,
+  LinearScale,
+  CategoryScale,
+  Title,
+  Tooltip,
+  Filler
+} from 'chart.js'
+
+// Register Chart.js components
+Chart.register(
+  LineController,
+  LineElement,
+  PointElement,
+  LinearScale,
+  CategoryScale,
+  Title,
+  Tooltip,
+  Filler
+)
 
 const route = useRoute();
+const router = useRouter();
 const deviceId = computed(() => route.params.deviceId);
 const deviceName = ref('Loading...');
 const deviceLocation = ref('');
+const deviceInfo = ref({});
 
 const latest = ref(null);
 const history = ref([]);
 const lastUpdated = ref(new Date());
 const showMapModal = ref(false);
+const showOfflineModal = ref(false);
 const loading = ref(true);
 const noData = ref(false);
 
+// Tab state
+const activeTab = ref('overview');
+const timeRange = ref('week');
+
+// Chart refs
+const tempChart = ref(null);
+const humidityChart = ref(null);
+const smokeChart = ref(null);
+let tempChartInstance = null;
+let humidityChartInstance = null;
+let smokeChartInstance = null;
+
+// Computed statistics
+const tempPeak = computed(() => {
+  const temps = filteredHistory.value.filter(h => h.temperature).map(h => h.temperature);
+  return temps.length ? Math.max(...temps).toFixed(1) : 'N/A';
+});
+
+const tempAvg = computed(() => {
+  const temps = filteredHistory.value.filter(h => h.temperature).map(h => h.temperature);
+  return temps.length ? (temps.reduce((a, b) => a + b, 0) / temps.length).toFixed(1) : 'N/A';
+});
+
+const tempMin = computed(() => {
+  const temps = filteredHistory.value.filter(h => h.temperature).map(h => h.temperature);
+  return temps.length ? Math.min(...temps).toFixed(1) : 'N/A';
+});
+
+const humidityPeak = computed(() => {
+  const humidities = filteredHistory.value.filter(h => h.humidity).map(h => h.humidity);
+  return humidities.length ? Math.max(...humidities).toFixed(1) : 'N/A';
+});
+
+const humidityAvg = computed(() => {
+  const humidities = filteredHistory.value.filter(h => h.humidity).map(h => h.humidity);
+  return humidities.length ? (humidities.reduce((a, b) => a + b, 0) / humidities.length).toFixed(1) : 'N/A';
+});
+
+const humidityMin = computed(() => {
+  const humidities = filteredHistory.value.filter(h => h.humidity).map(h => h.humidity);
+  return humidities.length ? Math.min(...humidities).toFixed(1) : 'N/A';
+});
+
+const smokePeak = computed(() => {
+  const smokes = filteredHistory.value.filter(h => h.smokeAnalog).map(h => getSmokePercentage(h.smokeAnalog));
+  return smokes.length ? Math.max(...smokes).toFixed(0) : 'N/A';
+});
+
+const smokeAvg = computed(() => {
+  const smokes = filteredHistory.value.filter(h => h.smokeAnalog).map(h => getSmokePercentage(h.smokeAnalog));
+  return smokes.length ? (smokes.reduce((a, b) => a + b, 0) / smokes.length).toFixed(0) : 'N/A';
+});
+
+const timeRangeLabel = computed(() => {
+  if (timeRange.value === 'week') return 'Last 7 Days';
+  if (timeRange.value === 'month') return 'Last 30 Days';
+  if (timeRange.value === 'year') return 'Last 365 Days';
+  return '';
+});
+
+const filteredHistory = computed(() => {
+  const now = new Date();
+  const cutoffDate = new Date();
+  
+  if (timeRange.value === 'week') {
+    cutoffDate.setDate(now.getDate() - 7);
+  } else if (timeRange.value === 'month') {
+    cutoffDate.setDate(now.getDate() - 30);
+  } else if (timeRange.value === 'year') {
+    cutoffDate.setDate(now.getDate() - 365);
+  }
+  
+  return history.value.filter(h => h.dateTime >= cutoffDate);
+});
+
+// Watch for timeRange changes and update charts
+watch(timeRange, () => {
+  nextTick(() => {
+    renderCharts();
+  });
+});
+
 function closeMap() {
   showMapModal.value = false;
+}
+
+function changeTimeRange(range) {
+  timeRange.value = range;
+  // Re-render charts with new filtered data
+  renderCharts();
+}
+
+async function confirmDisconnect() {
+  const confirmMessage = `Disconnect "${deviceName.value}" from your account?\n\nThis will:\n- Remove the device from your dashboard\n- Stop fetching data for this device\n- Keep all sensor data in Realtime Database\n\nYou can re-add this device later using its ID.`;
+  
+  if (confirm(confirmMessage)) {
+    await disconnectDevice();
+  }
+}
+
+async function disconnectDevice() {
+  try {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      alert('You must be logged in to disconnect a device.');
+      return;
+    }
+
+    console.log("🔌 Disconnecting device from account...");
+
+    // Use composite ID: userId_deviceId
+    const docId = `${currentUser.uid}_${deviceId.value}`;
+    const deviceRef = doc(db, "devices", docId);
+    
+    // Check if device exists in Firestore
+    const docSnap = await getDoc(deviceRef);
+    
+    if (docSnap.exists()) {
+      // Delete only the Firestore registration (disconnect from account)
+      await deleteDoc(deviceRef);
+      console.log("✅ Device disconnected from your account");
+    } else {
+      console.log("ℹ️ Device not found in Firestore");
+    }
+    
+    // Close modal if open
+    showOfflineModal.value = false;
+    
+    // Navigate back to home
+    router.push('/');
+  } catch (error) {
+    console.error("❌ Error disconnecting device:", error);
+    alert(`Failed to disconnect device: ${error.message}`);
+  }
+}
+
+async function confirmDelete() {
+  const confirmMessage = `⚠️ PERMANENTLY DELETE "${deviceName.value}"?\n\nThis will:\n- Remove the device from your account\n- Delete ALL sensor data from Realtime Database\n- Cannot be undone\n\nAre you absolutely sure?`;
+  
+  if (confirm(confirmMessage)) {
+    await deleteDevice();
+  }
+}
+
+async function deleteDevice() {
+  try {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      alert('You must be logged in to delete a device.');
+      return;
+    }
+
+    console.log("🗑️ Starting complete device deletion...");
+
+    // Use composite ID: userId_deviceId
+    const docId = `${currentUser.uid}_${deviceId.value}`;
+    const deviceRef = doc(db, "devices", docId);
+    
+    // Check if device exists in Firestore
+    const docSnap = await getDoc(deviceRef);
+    
+    if (docSnap.exists()) {
+      // Delete the device document from Firestore
+      await deleteDoc(deviceRef);
+      console.log("✅ Device removed from Firestore (disconnected from your account)");
+    } else {
+      console.log("ℹ️ Device not found in Firestore (already deleted or never existed)");
+    }
+
+    // Optionally try to delete device data from Realtime Database
+    // This may fail due to permissions, which is okay
+    try {
+      const rtdbDeviceRef = dbRef(rtdb, `devices/${deviceId.value}`);
+      await remove(rtdbDeviceRef);
+      console.log("✅ Device data deleted from Realtime Database");
+    } catch (rtdbError) {
+      console.warn("⚠️ Could not delete from RTDB:", rtdbError.message);
+      console.log("ℹ️ Device disconnected from your account. RTDB data may remain.");
+    }
+    
+    console.log("✅ Device disconnected successfully");
+    
+    // Close modal if open
+    showOfflineModal.value = false;
+    
+    // Navigate back to home
+    router.push('/');
+  } catch (error) {
+    console.error("❌ Error deleting device:", error);
+    alert(`Failed to delete device: ${error.message}`);
+  }
 }
 
 // Defensive: remove any accidental JSON blobs rendered by extensions/old cache
@@ -237,16 +749,22 @@ function getSmokeBadgeClass(percentage) {
 
 async function fetchDeviceInfo() {
   try {
-    const deviceRef = doc(db, "devices", deviceId.value);
+    const currentUser = auth.currentUser;
+    if (!currentUser) return;
+
+    // Use composite ID: userId_deviceId
+    const docId = `${currentUser.uid}_${deviceId.value}`;
+    const deviceRef = doc(db, "devices", docId);
     const docSnap = await getDoc(deviceRef);
     
     if (docSnap.exists()) {
       const data = docSnap.data();
+      deviceInfo.value = data;
       deviceName.value = data.name || data.deviceId || deviceId.value;
       if (data.location && typeof data.location === 'string') {
         deviceLocation.value = data.location;
-      } else if (data.location && data.location.lat) {
-        deviceLocation.value = `${data.location.lat.toFixed(4)}, ${data.location.lng.toFixed(4)}`;
+      } else if (data.coordinates && data.coordinates.lat) {
+        deviceLocation.value = `${data.coordinates.lat.toFixed(6)}, ${data.coordinates.lng.toFixed(6)}`;
       }
     } else {
       deviceName.value = deviceId.value;
@@ -315,6 +833,9 @@ async function fetchData() {
         
         lastUpdated.value = new Date();
         console.log("✅ Device data updated at:", lastUpdated.value.toLocaleTimeString());
+        
+        // Render charts with updated data
+        renderCharts();
       } else {
         console.warn("⚠️ No data found for device:", deviceId.value);
         loading.value = false;
@@ -369,6 +890,13 @@ onMounted(() => {
   fetchData(); // Sets up real-time listener
 });
 
+onUnmounted(() => {
+  // Cleanup chart instances
+  if (tempChartInstance) tempChartInstance.destroy();
+  if (humidityChartInstance) humidityChartInstance.destroy();
+  if (smokeChartInstance) smokeChartInstance.destroy();
+});
+
 // Format helpers
 function formatTime(date) {
   return new Intl.DateTimeFormat("en-US", {
@@ -385,6 +913,165 @@ function formatDate(date) {
     day: "numeric",
     year: "numeric"
   }).format(date);
+}
+
+function renderCharts() {
+  if (filteredHistory.value.length === 0) return;
+  
+  nextTick(() => {
+    // Prepare data (reverse for chronological order)
+    const sortedHistory = [...filteredHistory.value].reverse();
+    const labels = sortedHistory.map((h, i) => formatTime(h.dateTime));
+    const temperatures = sortedHistory.map(h => h.temperature || null);
+    const humidities = sortedHistory.map(h => h.humidity || null);
+    const smokes = sortedHistory.map(h => getSmokePercentage(h.smokeAnalog));
+    
+    // Temperature Chart
+    if (tempChart.value) {
+      if (tempChartInstance) tempChartInstance.destroy();
+      tempChartInstance = new Chart(tempChart.value, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Temperature',
+            data: temperatures,
+            borderColor: '#f59e0b',
+            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+            borderWidth: 2,
+            fill: true,
+            tension: 0.4,
+            pointRadius: 3,
+            pointHoverRadius: 5
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: true,
+          aspectRatio: 2,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: 'rgba(0, 0, 0, 0.8)',
+              padding: 8,
+              callbacks: {
+                label: (context) => `${context.parsed.y}°C`
+              }
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: false,
+              ticks: { color: '#6b7280' },
+              grid: { color: 'rgba(0, 0, 0, 0.05)' }
+            },
+            x: {
+              ticks: { color: '#6b7280', maxRotation: 45, minRotation: 45 },
+              grid: { display: false }
+            }
+          }
+        }
+      });
+    }
+    
+    // Humidity Chart
+    if (humidityChart.value) {
+      if (humidityChartInstance) humidityChartInstance.destroy();
+      humidityChartInstance = new Chart(humidityChart.value, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Humidity',
+            data: humidities,
+            borderColor: '#3b82f6',
+            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+            borderWidth: 2,
+            fill: true,
+            tension: 0.4,
+            pointRadius: 3,
+            pointHoverRadius: 5
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: true,
+          aspectRatio: 2,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: 'rgba(0, 0, 0, 0.8)',
+              padding: 8,
+              callbacks: {
+                label: (context) => `${context.parsed.y}%`
+              }
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              max: 100,
+              ticks: { color: '#6b7280' },
+              grid: { color: 'rgba(0, 0, 0, 0.05)' }
+            },
+            x: {
+              ticks: { color: '#6b7280', maxRotation: 45, minRotation: 45 },
+              grid: { display: false }
+            }
+          }
+        }
+      });
+    }
+    
+    // Smoke Chart
+    if (smokeChart.value) {
+      if (smokeChartInstance) smokeChartInstance.destroy();
+      smokeChartInstance = new Chart(smokeChart.value, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Smoke Level',
+            data: smokes,
+            borderColor: '#dc2626',
+            backgroundColor: 'rgba(220, 38, 38, 0.1)',
+            borderWidth: 2,
+            fill: true,
+            tension: 0.4,
+            pointRadius: 3,
+            pointHoverRadius: 5
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: true,
+          aspectRatio: 2,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: 'rgba(0, 0, 0, 0.8)',
+              padding: 8,
+              callbacks: {
+                label: (context) => `${context.parsed.y}%`
+              }
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              max: 100,
+              ticks: { color: '#6b7280' },
+              grid: { color: 'rgba(0, 0, 0, 0.05)' }
+            },
+            x: {
+              ticks: { color: '#6b7280', maxRotation: 45, minRotation: 45 },
+              grid: { display: false }
+            }
+          }
+        }
+      });
+    }
+  });
 }
 
 const smokePercentage = computed(() => {
@@ -418,18 +1105,23 @@ pre, code {
   display: flex;
   flex-direction: column;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  overflow-x: hidden;
-  position: relative;
-  z-index: 1;
 }
 
 .header {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 400px;
+  width: 100%;
   background-color: #dc2626;
   height: 60px;
   display: flex;
   align-items: center;
   padding: 0 16px;
   gap: 12px;
+  z-index: 100;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
 .back-btn {
@@ -440,6 +1132,13 @@ pre, code {
   padding: 8px;
   display: flex;
   align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  transition: background-color 0.2s;
+}
+
+.back-btn:hover {
+  background-color: rgba(255, 255, 255, 0.1);
 }
 
 .back-icon {
@@ -449,13 +1148,87 @@ pre, code {
 
 .header-title {
   color: white;
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 700;
   margin: 0;
+  flex: 1;
+}
+
+/* Tab Navigation */
+.tab-nav {
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 400px;
+  width: 100%;
+  background-color: white;
+  display: flex;
+  border-bottom: 1px solid #e5e7eb;
+  z-index: 99;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 14px 16px;
+  background: none;
+  border: none;
+  font-size: 14px;
+  font-weight: 600;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.2s;
+  border-bottom: 2px solid transparent;
+}
+
+.tab-btn:hover {
+  color: #374151;
+  background: #f9fafb;
+}
+
+.tab-btn.active {
+  color: #dc2626;
+  border-bottom-color: #dc2626;
+}
+
+/* Time Range Filter */
+.time-range-filter {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding: 4px;
+  background: #f3f4f6;
+  border-radius: 8px;
+}
+
+.range-btn {
+  flex: 1;
+  padding: 10px 16px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.range-btn:hover {
+  color: #374151;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.range-btn.active {
+  background: white;
+  color: #dc2626;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .main-content {
-  padding: 24px 20px;
+  padding: 20px 16px;
+  padding-top: 124px;
   padding-bottom: 88px;
   flex: 1;
 }
@@ -465,7 +1238,7 @@ pre, code {
   border: 2px solid #ef4444;
   border-radius: 12px;
   padding: 16px;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
   text-align: center;
   color: #991b1b;
   font-size: 14px;
@@ -477,7 +1250,7 @@ pre, code {
   border: 2px solid #f97316;
   border-radius: 12px;
   padding: 16px;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
   text-align: center;
   color: #7c2d12;
   font-size: 14px;
@@ -489,7 +1262,7 @@ pre, code {
   border: 2px solid #eab308;
   border-radius: 12px;
   padding: 16px;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
   text-align: center;
   color: #713f12;
   font-size: 14px;
@@ -506,7 +1279,8 @@ pre, code {
   display: flex;
   flex-direction: column;
   align-items: center;
-  margin-bottom: 32px;
+  margin-bottom: 24px;
+  margin-top: 8px;
 }
 
 .status-circle {
@@ -568,7 +1342,7 @@ pre, code {
 
 .time-section {
   text-align: center;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .current-time {
@@ -589,7 +1363,7 @@ pre, code {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  margin-bottom: 40px;
+  margin-bottom: 24px;
 }
 
 .location-icon {
@@ -605,7 +1379,7 @@ pre, code {
 }
 
 .sensor-section {
-  margin: 32px 0;
+  margin: 24px 0;
   padding: 16px;
   background-color: #f3f4f6;
   border-radius: 12px;
@@ -663,8 +1437,289 @@ pre, code {
   color: #92400e;
 }
 
-.history-section {
+.charts-section {
+  margin-top: 24px;
+  margin-bottom: 24px;
+}
+
+.section-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #374151;
+  margin: 0 0 20px 0;
+  letter-spacing: 0.5px;
+}
+
+.chart-card {
+  background: white;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border: 1px solid #e5e7eb;
+}
+
+.chart-container {
+  height: 200px;
+  width: 100%;
+  position: relative;
+  margin-bottom: 12px;
+}
+
+.chart-container canvas {
+  max-height: 200px !important;
+  width: 100% !important;
+  height: 200px !important;
+}
+
+.chart-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #6b7280;
+  margin: 0 0 12px 0;
+}
+
+.chart-stats {
+  display: flex;
+  justify-content: space-around;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.stat-item {
+  font-size: 13px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.stat-item:first-child {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+/* Current Readings Section */
+.current-readings-section {
+  margin: 20px 0;
+}
+
+.readings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.reading-card {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.reading-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.reading-icon {
+  font-size: 32px;
+  margin-bottom: 8px;
+}
+
+.reading-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 4px;
+}
+
+.reading-label {
+  font-size: 12px;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Quick Actions */
+.quick-actions {
+  display: flex;
+  gap: 12px;
+  margin: 20px 0;
+}
+
+.action-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 20px;
+  background: white;
+  border: 2px solid #dc2626;
+  color: #dc2626;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.action-btn:hover {
+  background: #dc2626;
+  color: white;
+}
+
+/* Info Section */
+.info-section {
+  padding-bottom: 24px;
+}
+
+.info-card {
+  background: white;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e5e7eb;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.info-row:last-child {
+  border-bottom: none;
+}
+
+.info-label {
+  font-size: 14px;
+  color: #6b7280;
+  font-weight: 600;
+}
+
+.info-value {
+  font-size: 14px;
+  color: #111827;
+  font-weight: 500;
+  text-align: right;
+  max-width: 60%;
+  word-wrap: break-word;
+}
+
+.text-alert {
+  color: #dc2626 !important;
+  font-weight: 600 !important;
+}
+
+.text-safe {
+  color: #10b981 !important;
+  font-weight: 600 !important;
+}
+
+/* Danger Zone */
+.danger-zone {
   margin-top: 32px;
+  padding: 20px;
+  background: #fef2f2;
+  border: 2px solid #fecaca;
+  border-radius: 12px;
+}
+
+.danger-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #dc2626;
+  margin-bottom: 16px;
+}
+
+.management-section {
+  background: white;
+  padding: 16px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  border: 1px solid #e5e7eb;
+}
+
+.management-section:last-child {
+  margin-bottom: 0;
+}
+
+.management-subtitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+  margin: 0 0 8px 0;
+}
+
+.management-description {
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+
+.management-btn {
+  width: 100%;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.disconnect-btn {
+  background: #f97316;
+  color: white;
+}
+
+.disconnect-btn:hover {
+  background: #ea580c;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.3);
+}
+
+.delete-btn {
+  background: #dc2626;
+  color: white;
+}
+
+.delete-btn:hover {
+  background: #b91c1c;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
+}
+
+.management-btn:active {
+  transform: translateY(0);
+}
+
+.danger-description {
+  font-size: 13px;
+  color: #6b7280;
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.no-data-message {
+  text-align: center;
+  padding: 60px 20px;
+  color: #9ca3af;
+  font-size: 15px;
+}
+
+.history-section {
+  margin-top: 24px;
+  margin-bottom: 24px;
 }
 
 .history-title {
@@ -801,7 +1856,29 @@ pre, code {
 .no-data-text {
   font-size: 14px;
   color: #6b7280;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
+}
+
+.diagnostics-btn {
+  margin-top: 16px;
+  padding: 12px 24px;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.diagnostics-btn:hover {
+  background: #b91c1c;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
 }
 
 .no-data-hint {
@@ -812,4 +1889,182 @@ pre, code {
   padding: 8px 12px;
   border-radius: 6px;
 }
+
+/* Offline Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 20px;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.offline-modal {
+  background: white;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.offline-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 24px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.offline-modal-header h2 {
+  font-size: 20px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0;
+}
+
+.close-modal-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 4px 8px;
+  line-height: 1;
+  transition: color 0.2s;
+}
+
+.close-modal-btn:hover {
+  color: #111827;
+}
+
+.offline-modal-content {
+  padding: 24px;
+}
+
+.offline-info-card {
+  background: #f9fafb;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.offline-info-card h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #111827;
+  margin: 0 0 12px 0;
+}
+
+.diagnostic-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.diagnostic-item:last-child {
+  border-bottom: none;
+}
+
+.diagnostic-label {
+  font-size: 13px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.diagnostic-value {
+  font-size: 13px;
+  color: #111827;
+  font-weight: 600;
+  text-align: right;
+  max-width: 60%;
+  word-break: break-all;
+}
+
+.offline-status {
+  color: #dc2626 !important;
+}
+
+.troubleshooting-list {
+  margin: 0;
+  padding-left: 20px;
+  list-style-type: disc;
+}
+
+.troubleshooting-list li {
+  font-size: 13px;
+  color: #6b7280;
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.offline-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.action-btn-modal {
+  flex: 1;
+  padding: 12px 20px;
+  border: 2px solid #dc2626;
+  background: white;
+  color: #dc2626;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.action-btn-modal:hover {
+  background: #dc2626;
+  color: white;
+}
+
+.action-btn-modal.warning {
+  background: #f97316;
+  color: white;
+  border-color: #f97316;
+}
+
+.action-btn-modal.warning:hover {
+  background: #ea580c;
+}
+
+.action-btn-modal.danger {
+  background: #dc2626;
+  color: white;
+}
+
+.action-btn-modal.danger:hover {
+  background: #b91c1c;
+}
+
 </style>

@@ -5,6 +5,7 @@
       <button @click="toggleMenu" class="nav-btn" aria-label="Menu">
         <Menu class="nav-icon" />
       </button>
+      <h1 class="app-title">FireTap</h1>
       <div class="nav-spacer"></div>
       <button @click="goToNotifications" class="nav-btn" aria-label="Notifications">
         <Bell class="nav-icon" />
@@ -34,6 +35,9 @@
             <a @click="navigateTo('/map')" class="drawer-link">
               <MapPin class="drawer-icon" /> Location
             </a>
+            <a @click="navigateTo('/about')" class="drawer-link">
+              <Info class="drawer-icon" /> About
+            </a>
             <a @click="navigateTo('/settings')" class="drawer-link">
               <Settings class="drawer-icon" /> Settings
             </a>
@@ -41,6 +45,129 @@
         </div>
       </div>
     </transition>
+
+    <!-- Add Device Modal -->
+    <transition name="modal">
+      <div v-if="showAddModal" class="modal-overlay" @click="showAddModal = false">
+        <div class="modal-container" @click.stop>
+          <div class="modal-header">
+            <h2>Add New Device</h2>
+            <button @click="showAddModal = false" class="modal-close-btn">
+              <X class="icon" />
+            </button>
+          </div>
+          <div class="modal-body">
+            <form @submit.prevent="handleAddDevice">
+              <div class="form-group">
+                <div class="label-with-help">
+                  <label for="deviceId">Device ID *</label>
+                  <button 
+                    type="button" 
+                    @click="showDeviceIdHelp = !showDeviceIdHelp" 
+                    class="help-btn"
+                    title="How to get Device ID?"
+                  >
+                    <HelpCircle class="help-icon" />
+                  </button>
+                </div>
+                
+                <!-- Collapsible Help Section -->
+                <transition name="slide">
+                  <div v-if="showDeviceIdHelp" class="help-section">
+                    <p class="help-title">How to get Device ID?</p>
+                    <p class="help-text">Each fire alarm device has a unique identifier. You can find it:</p>
+                    <ul class="help-list">
+                      <li>On the device label or QR code</li>
+                      <li>In the device setup documentation</li>
+                      <li>From your system administrator</li>
+                    </ul>
+                  </div>
+                </transition>
+                
+                <input 
+                  type="text" 
+                  id="deviceId" 
+                  v-model="formData.deviceId" 
+                  placeholder="e.g., DEVICE_001"
+                  required
+                />
+                <small>Enter the unique device identifier</small>
+              </div>
+
+              <div class="form-group">
+                <label for="deviceName">Device Name *</label>
+                <input 
+                  type="text" 
+                  id="deviceName" 
+                  v-model="formData.name" 
+                  placeholder="e.g., Kitchen Sensor"
+                  required
+                />
+              </div>
+
+              <div class="form-group">
+                <label for="location">Location</label>
+                <button 
+                  type="button"
+                  class="location-btn"
+                  @click="() => { console.log('🗺️ Opening location picker'); showLocationPicker = true; }"
+                >
+                  <MapPin class="location-icon" />
+                  {{ formData.coordinates ? `${formData.coordinates.lat.toFixed(6)}, ${formData.coordinates.lng.toFixed(6)}` : 'Click to set location on map' }}
+                </button>
+                <small v-if="formData.coordinates">Coordinates: {{ formData.coordinates.lat.toFixed(6) }}, {{ formData.coordinates.lng.toFixed(6) }}</small>
+              </div>
+
+              <div class="form-group">
+                <label for="description">Description</label>
+                <textarea 
+                  id="description" 
+                  v-model="formData.description" 
+                  placeholder="Optional notes about this device"
+                  rows="2"
+                ></textarea>
+              </div>
+
+              <div v-if="addError" class="error-message">
+                {{ addError }}
+              </div>
+
+              <div v-if="addSuccess" class="success-message">
+                Device added successfully!
+              </div>
+
+              <div class="modal-actions">
+                <button type="button" @click="showAddModal = false" class="btn-secondary">
+                  Cancel
+                </button>
+                <button type="submit" class="btn-primary" :disabled="isSubmitting">
+                  {{ isSubmitting ? 'Adding...' : 'Add Device' }}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </transition>
+
+    <!-- Error Modal -->
+    <transition name="modal">
+      <div v-if="showErrorModal" class="modal-overlay" @click="showErrorModal = false">
+        <div class="error-modal-content" @click.stop>
+          <div class="modal-icon">⚠️</div>
+          <h3 class="modal-title">Device Not Found</h3>
+          <p class="modal-message">{{ errorModalMessage }}</p>
+          <button @click="showErrorModal = false" class="modal-btn">OK</button>
+        </div>
+      </div>
+    </transition>
+
+    <!-- Location Picker Modal -->
+    <LocationPicker 
+      v-if="showLocationPicker"
+      @close="showLocationPicker = false"
+      @confirm="handleLocationConfirm"
+    />
 
     <!-- Main Content -->
     <div class="main-content">
@@ -62,7 +189,7 @@
 
       <!-- Add Device Button -->
       <div class="button-row">
-        <button @click="$router.push('/add-device')" class="add-device-btn">
+        <button @click="showAddModal = true" class="add-device-btn">
           <Plus class="icon" />
           Add New Device
         </button>
@@ -73,14 +200,14 @@
 
       <!-- Device List -->
       <div class="devices-section">
-        <h2 class="section-title">My Devices</h2>
+        <h2 class="section-title">Fire Safety Devices</h2>
         
         <div v-if="loading" class="loading">Loading devices...</div>
         
         <div v-else-if="devices.length === 0" class="empty-state">
           <Inbox class="empty-icon" />
           <p>No devices registered yet</p>
-          <button @click="$router.push('/add-device')" class="btn-primary-small">
+          <button @click="showAddModal = true" class="btn-primary-small">
             Add Your First Device
           </button>
         </div>
@@ -90,13 +217,13 @@
             v-for="device in devices" 
             :key="device.id" 
             class="device-card"
-            @click="$router.push(`/device/${device.id}`)"
+            @click="$router.push(`/device/${device.deviceId}`)"
           >
             <div class="device-icon" :class="getStatusClass(device.status)">
               <Bell class="icon" />
             </div>
             <div class="device-info">
-              <div class="device-name">{{ device.name || device.id }}</div>
+              <div class="device-name">{{ device.name || device.deviceId }}</div>
               <div class="device-location" v-if="device.location">
                 <MapPin class="loc-icon" />
                 {{ device.location }}
@@ -118,16 +245,42 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from "vue";
 import { useRouter } from "vue-router";
-import { collection, query, getDocs, orderBy, where } from "firebase/firestore";
-import { ref as dbRef, onValue } from "firebase/database";
+import { collection, query, getDocs, where, doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
+import { ref as dbRef, onValue, get } from "firebase/database";
 import { db, rtdb, auth } from "@/firebase";
-import { Bell, MapPin, Plus, Inbox, Menu, X, Settings } from 'lucide-vue-next';
+import { Bell, MapPin, Plus, Inbox, Menu, X, Settings, HelpCircle, Info } from 'lucide-vue-next';
+import LocationPicker from '@/components/LocationPicker.vue';
 
 const router = useRouter();
 
 const devices = ref([]);
 const loading = ref(true);
 const menuOpen = ref(false);
+const showAddModal = ref(false);
+const showDeviceIdHelp = ref(false);
+
+function handleLocationConfirm(location) {
+  console.log('📍 Location confirmed:', location);
+  formData.value.coordinates = location;
+  // Set text location to coordinates
+  formData.value.location = `${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}`;
+  console.log('✅ Form data updated with coordinates');
+}
+
+// Add device form state
+const formData = ref({
+  deviceId: '',
+  name: '',
+  location: '',
+  description: '',
+  coordinates: null  // { lat, lng, address }
+});
+const isSubmitting = ref(false);
+const addError = ref('');
+const addSuccess = ref(false);
+const showErrorModal = ref(false);
+const errorModalMessage = ref('');
+const showLocationPicker = ref(false);
 
 function toggleMenu() {
   menuOpen.value = !menuOpen.value;
@@ -162,25 +315,38 @@ const alertDevicesCount = computed(() =>
 async function fetchDevices() {
   loading.value = true;
   try {
-    // Get device list from Firestore (device registry) - accessible by all users
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      console.log('❌ No current user');
+      loading.value = false;
+      return;
+    }
+
+    console.log('🔍 Fetching devices for user:', currentUser.uid);
+
+    // Get device list from Firestore - only devices added by this user
     const q = query(
       collection(db, "devices"),
-      orderBy("updatedAt", "desc")
+      where("addedBy", "==", currentUser.uid)
     );
     const snapshot = await getDocs(q);
+    
+    console.log('📦 Firestore query returned:', snapshot.docs.length, 'documents');
     
     const deviceList = snapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
       status: 'Loading...', // Will be updated from Realtime DB
       updatedAt: doc.data().updatedAt?.toDate?.() || new Date()
-    }));
+    }))
+    .sort((a, b) => b.updatedAt - a.updatedAt); // Sort in memory instead of Firestore
 
     devices.value = deviceList;
+    console.log('✅ Devices loaded:', deviceList.length, deviceList);
 
     // Fetch live status from Realtime Database for each device
     deviceList.forEach(device => {
-      const deviceDataRef = dbRef(rtdb, `devices/${device.id}`);
+      const deviceDataRef = dbRef(rtdb, `devices/${device.deviceId}`);
       onValue(deviceDataRef, (snapshot) => {
         if (snapshot.exists()) {
           const data = snapshot.val();
@@ -256,6 +422,103 @@ function formatRelativeTime(date) {
   return `${diffDays}d ago`;
 }
 
+async function handleAddDevice() {
+  addError.value = '';
+  addSuccess.value = false;
+  isSubmitting.value = true;
+
+  try {
+    const deviceId = formData.value.deviceId.trim();
+    
+    if (!deviceId) {
+      addError.value = 'Device ID is required';
+      isSubmitting.value = false;
+      return;
+    }
+
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      addError.value = 'You must be logged in to add devices';
+      isSubmitting.value = false;
+      return;
+    }
+
+    // Check if THIS USER already added this device
+    const userDeviceRef = doc(db, 'devices', `${currentUser.uid}_${deviceId}`);
+    const docSnap = await getDoc(userDeviceRef);
+
+    console.log('📝 Checking document ID:', `${currentUser.uid}_${deviceId}`);
+
+    if (docSnap.exists()) {
+      addError.value = 'You have already registered this device';
+      isSubmitting.value = false;
+      return;
+    }
+
+    // Verify device exists in Realtime Database (ESP32 is sending data)
+    const rtdbDeviceRef = dbRef(rtdb, `devices/${deviceId}`);
+    const rtdbSnapshot = await get(rtdbDeviceRef);
+    
+    if (!rtdbSnapshot.exists()) {
+      errorModalMessage.value = `Device "${deviceId}" doesn't exist in active devices. Check if ESP32 is sending data.`;
+      showErrorModal.value = true;
+      isSubmitting.value = false;
+      return;
+    }
+
+    console.log('✅ Device found in RTDB:', rtdbSnapshot.val());
+
+    // Add device to Firestore with user-specific document ID
+    console.log('💾 Saving to Firestore with composite ID:', `${currentUser.uid}_${deviceId}`);
+    
+    const deviceData = {
+      deviceId: deviceId,
+      name: formData.value.name.trim() || deviceId,
+      location: formData.value.location.trim() || '',
+      description: formData.value.description.trim() || '',
+      status: 'Safe',
+      addedBy: currentUser.uid,
+      addedByEmail: currentUser.email || 'unknown',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    };
+
+    // Add coordinates if set via location picker
+    if (formData.value.coordinates) {
+      deviceData.coordinates = {
+        lat: formData.value.coordinates.lat,
+        lng: formData.value.coordinates.lng
+      };
+    }
+    
+    await setDoc(userDeviceRef, deviceData);
+
+    console.log('✅ Device added successfully to Firestore!');
+    addSuccess.value = true;
+
+    // Reset form and close modal after 1 second
+    setTimeout(() => {
+      formData.value = {
+        deviceId: '',
+        name: '',
+        location: '',
+        description: '',
+        coordinates: null
+      };
+      addSuccess.value = false;
+      showAddModal.value = false;
+      // Refresh devices list
+      fetchDevices();
+    }, 1000);
+
+  } catch (err) {
+    console.error('❌ Error adding device:', err);
+    addError.value = 'Failed to add device. Please try again.';
+  } finally {
+    isSubmitting.value = false;
+  }
+}
+
 onMounted(() => {
   fetchDevices(); // Real-time listeners are set up inside
 });
@@ -288,6 +551,14 @@ onMounted(() => {
   gap: 12px;
   z-index: 100;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.app-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: white;
+  margin: 0;
+  margin-left: 8px;
 }
 
 .nav-btn {
@@ -330,11 +601,14 @@ onMounted(() => {
 
 .drawer {
   width: 280px;
-  background: white;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   height: 100vh;
   box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15);
   display: flex;
   flex-direction: column;
+  border-right: 1px solid rgba(255, 255, 255, 0.3);
 }
 
 .drawer-header {
@@ -640,5 +914,380 @@ onMounted(() => {
 .device-status-badge.alert {
   background: #fee2e2;
   color: #991b1b;
+}
+
+/* Modal Styles */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.modal-container {
+  background: white;
+  border-radius: 16px;
+  max-width: 480px;
+  width: 100%;
+  max-height: 85vh;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-header {
+  background: #dc2626;
+  color: white;
+  padding: 16px 20px;
+  border-radius: 16px 16px 0 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.modal-close-btn {
+  background: none;
+  border: none;
+  color: white;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+}
+
+.modal-close-btn .icon {
+  width: 22px;
+  height: 22px;
+}
+
+.modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.label-with-help {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+  margin: 0;
+}
+
+.help-btn {
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  color: #6b7280;
+  transition: color 0.2s;
+}
+
+.help-btn:hover {
+  color: #dc2626;
+}
+
+.help-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.help-section {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+
+.help-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0c4a6e;
+  margin: 0 0 8px 0;
+}
+
+.help-text {
+  font-size: 13px;
+  color: #075985;
+  margin: 0 0 8px 0;
+}
+
+.help-list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  color: #075985;
+}
+
+.help-list li {
+  margin-bottom: 4px;
+}
+
+/* Slide transition for help section */
+.slide-enter-active,
+.slide-leave-active {
+  transition: all 0.3s ease;
+  max-height: 200px;
+  overflow: hidden;
+}
+
+.slide-enter-from,
+.slide-leave-to {
+  max-height: 0;
+  opacity: 0;
+  margin-bottom: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.form-group input,
+.form-group textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.form-group input:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: #dc2626;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.1);
+}
+
+.form-group small {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.location-btn {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #374151;
+  background: white;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+}
+
+.location-btn:hover {
+  border-color: #dc2626;
+  background: #fef2f2;
+}
+
+.location-icon {
+  width: 18px;
+  height: 18px;
+  color: #dc2626;
+  flex-shrink: 0;
+}
+
+.form-group textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.btn-secondary {
+  flex: 1;
+  padding: 12px;
+  background: #f3f4f6;
+  color: #374151;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-secondary:hover {
+  background: #e5e7eb;
+}
+
+.btn-primary {
+  flex: 1;
+  padding: 12px;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.error-message {
+  padding: 12px;
+  background: #fee2e2;
+  color: #991b1b;
+  border-radius: 8px;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.success-message {
+  padding: 12px;
+  background: #dcfce7;
+  color: #166534;
+  border-radius: 8px;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.info-section {
+  margin-top: 24px;
+  padding: 16px;
+  background: #f9fafb;
+  border-radius: 8px;
+}
+
+.info-section h4 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.info-section p {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.info-section ul {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.info-section li {
+  margin-bottom: 4px;
+}
+
+.error-modal-content {
+  background: white;
+  border-radius: 16px;
+  padding: 32px;
+  max-width: 400px;
+  text-align: center;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+}
+
+.modal-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.modal-title {
+  margin: 0 0 12px 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.modal-message {
+  margin: 0 0 24px 0;
+  font-size: 14px;
+  color: #6b7280;
+  line-height: 1.5;
+}
+
+.modal-btn {
+  padding: 12px 32px;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.modal-btn:hover {
+  background: #b91c1c;
+}
+
+/* Modal Animation */
+.modal-enter-active,
+.modal-leave-active {
+  transition: opacity 0.3s;
+}
+
+.modal-enter-active .modal-container,
+.modal-enter-active .error-modal-content,
+.modal-leave-active .modal-container,
+.modal-leave-active .error-modal-content {
+  transition: transform 0.3s, opacity 0.3s;
+}
+
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+}
+
+.modal-enter-from .modal-container,
+.modal-enter-from .error-modal-content,
+.modal-leave-to .modal-container,
+.modal-leave-to .error-modal-content {
+  transform: scale(0.9);
+  opacity: 0;
 }
 </style>

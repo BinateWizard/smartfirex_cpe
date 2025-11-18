@@ -5,6 +5,7 @@ import AddDevice from "@/views/AddDevice.vue";
 import DeviceDebug from "@/views/DeviceDebug.vue";
 import Login from "@/views/Login.vue";
 import Settings from "@/views/Settings.vue"
+import About from "@/views/About.vue"
 import showMap  from "@/components/showMap.vue";  
 import Notification from "@/views/Notifications.vue";
 
@@ -18,6 +19,7 @@ const routes = [
   { path: "/login", name: "login", component: Login },
   { path: "/map", name: "map", component: showMap, meta: { requiresAuth: true } },
   { path: "/settings", name: "settings", component: Settings, meta: { requiresAuth: true } },
+  { path: "/about", name: "about", component: About, meta: { requiresAuth: true } },
   { path: "/notifications", name: "notifications", component: Notification, meta: { requiresAuth: true } }, 
 
 ];
