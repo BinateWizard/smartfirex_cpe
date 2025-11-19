@@ -155,6 +155,9 @@
         <span v-else-if="latest.lastType === 'alarm'">Alarm has been triggered by sensors.</span>
         <span v-else>High smoke levels detected.</span>
         Press button for ≤1s to reset or activate sprinkler (6s hold).
+        <div class="respond-actions">
+          <button class="respond-btn" @click="handleRespond">🚑 Respond</button>
+        </div>
       </div>
 
       <!-- Sprinkler Active (6s press) -->
@@ -428,9 +431,9 @@
       <!-- Recent Status History -->
       <div class="history-section">
         <h2 class="history-title">RECENT STATUS HISTORY</h2>
-        <div class="history-list" v-if="history.length > 0">
+        <div class="history-list" v-if="statusCards.length > 0">
           <div 
-            v-for="entry in history" 
+            v-for="entry in statusCards" 
             :key="entry.id" 
             class="history-item"
           >
@@ -479,7 +482,7 @@
               </div>
           </div>
         </div>
-        <div v-else class="no-data">No history available for this device</div>
+        <div v-else class="no-data">No recent alerts for this device</div>
       </div>
       </div>
     </div>
@@ -495,6 +498,7 @@ import { useRouter } from "vue-router";
 import { doc, getDoc, deleteDoc } from "firebase/firestore";
 import { ref as dbRef, onValue, query, orderByChild, limitToLast, remove } from "firebase/database";
 import { db, rtdb, auth } from "@/firebase";
+import { stopAllAlerts } from "@/services/alertMonitor";
 import { 
   Bell, 
   MapPin, 
@@ -537,6 +541,7 @@ const deviceInfo = ref({});
 
 const latest = ref(null);
 const history = ref([]);
+const statusCards = ref([]);
 const lastUpdated = ref(new Date());
 const showMapModal = ref(false);
 const showOfflineModal = ref(false);
@@ -764,6 +769,20 @@ async function deleteDevice() {
   }
 }
 
+async function handleRespond() {
+  try {
+    // Stop all alert effects (sound + vibration)
+    stopAllAlerts();
+  } catch (_) { /* no-op */ }
+  // Show the whole map view
+  try {
+    router.push('/map');
+  } catch (_) {
+    // Fallback to inline modal if route is unavailable
+    showMapModal.value = true;
+  }
+}
+
 // Defensive: remove any accidental JSON blobs rendered by extensions/old cache
 function scrubDebugJSON() {
   try {
@@ -949,7 +968,7 @@ async function fetchData() {
         // Clean up any stray JSON blobs possibly injected by cache/extensions
         scrubDebugJSON();
         
-        // Build history from readings if available
+        // Build history from readings if available for charts/statistics
         if (data.readings && typeof data.readings === 'object') {
           const readingsArray = Object.entries(data.readings)
             .map(([key, value]) => {
@@ -967,13 +986,14 @@ async function fetchData() {
               };
             })
             .sort((a, b) => b.dateTime - a.dateTime)
-            .slice(0, 10);
+            .slice(0, 200);
           
           history.value = readingsArray;
         } else {
-          // If no history, just show current reading
-          history.value = [currentData];
+          // If no history, just show current reading for charts
+          history.value = currentData ? [currentData] : [];
         }
+        
         scrubDebugJSON();
         
         lastUpdated.value = new Date();
@@ -992,6 +1012,34 @@ async function fetchData() {
       console.error("❌ Error fetching device data:", error);
       loading.value = false;
       noData.value = true;
+    });
+
+    // Listen to recent status history cards (alerts only, last 5)
+    const statusHistoryRef = query(
+      dbRef(rtdb, `devices/${deviceId.value}/statusHistory`),
+      orderByChild('timestamp'),
+      limitToLast(5)
+    );
+
+    onValue(statusHistoryRef, (snap) => {
+      if (snap.exists()) {
+        const obj = snap.val() || {};
+        const arr = Object.entries(obj).map(([id, v]) => ({
+          id,
+          dateTime: v.timestamp ? new Date(v.timestamp) : new Date(),
+          smokeAnalog: (v.smokeLevel !== undefined) ? v.smokeLevel : 0,
+          gasStatus: v.gasStatus || 'normal',
+          temperature: v.temperature,
+          humidity: v.humidity,
+          message: v.message || 'Alert',
+          sensorError: false,
+          lastType: 'alarm',
+          status: 'Alert'
+        }))
+        .sort((a, b) => b.dateTime - a.dateTime);
+
+        statusCards.value = arr;
+      }
     });
   } catch (error) {
     console.error("❌ Error setting up data listener:", error);

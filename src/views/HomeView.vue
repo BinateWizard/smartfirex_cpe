@@ -5,7 +5,7 @@
       <button @click="toggleMenu" class="nav-btn" aria-label="Menu">
         <Menu class="nav-icon" />
       </button>
-      <h1 class="app-title">FireTap</h1>
+      <h1 class="app-title">SmartFireX</h1>
       <div class="nav-spacer"></div>
       <button @click="goToNotifications" class="nav-btn" aria-label="Notifications">
         <Bell class="nav-icon" />

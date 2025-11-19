@@ -158,13 +158,13 @@ function showAlertNotification(deviceName, message, vibrateAllowed = true) {
   const defaultVibrate = [800, 400, 800, 400, 800]
   const vibratePattern = vibrateAllowed ? defaultVibrate : []
 
-  const notification = new Notification('🔥 FireTap Alert!', {
+  const notification = new Notification('🔥 SmartFireX Alert!', {
     body: `${deviceName}: ${message}`,
     icon: '/img/icons/android-chrome-192x192.png',
     badge: '/img/icons/android-chrome-192x192.png',
     vibrate: vibratePattern,
     requireInteraction: true, // Notification stays until user dismisses
-    tag: 'firetap-alert', // Replace previous notifications
+    tag: 'smartfirex-alert', // Replace previous notifications
     data: { deviceName }
   })
   

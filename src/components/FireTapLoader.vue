@@ -2,7 +2,7 @@
   <div class="firetap-loader">
     <div class="firetap-loader-content">
       <div class="firetap-logo">🔥</div>
-      <div class="firetap-title">FireTap</div>
+      <div class="firetap-title">SmartFireX</div>
       <div class="firetap-subtitle">Loading...</div>
     </div>
   </div>

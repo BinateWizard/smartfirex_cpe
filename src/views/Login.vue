@@ -8,7 +8,7 @@
       <!-- Logo/Icon Section -->
       <div class="logo-section">
         <div class="logo-icon">🔥</div>
-        <h1 class="app-name">FireTap</h1>
+        <h1 class="app-name">SmartFireX</h1>
         <p class="app-tagline">Real-time Fire & Gas Detection Monitoring</p>
       </div>
 

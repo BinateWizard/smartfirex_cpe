@@ -1,7 +1,7 @@
 <template>
   <header class="header-nav" role="banner">
     <div class="container">
-      <div class="brand">FireTap</div>
+      <div class="brand">SmartFireX</div>
       <nav class="nav-links" role="navigation" aria-label="Desktop navigation">
         <router-link to="/" class="link" :class="{ active: route.name === 'home' }">Home</router-link>
         <router-link to="/map" class="link" :class="{ active: route.name === 'map' }">Location</router-link>

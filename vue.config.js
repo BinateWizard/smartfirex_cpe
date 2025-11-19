@@ -10,8 +10,8 @@ module.exports = defineConfig({
     }
   },
   pwa: {
-    name: 'FireTap',
-    shortName: 'FireTap',
+    name: 'SmartFireX',
+    shortName: 'SmartFireX',
     description: 'Fire and Gas Detection Monitoring System',
     themeColor: '#dc2626',
     backgroundColor: '#fffaf0',
@@ -27,8 +27,8 @@ module.exports = defineConfig({
       msTileImage: 'img/icons/mstile-150x150.png'
     },
     manifestOptions: {
-      name: 'FireTap - Fire Detection System',
-      short_name: 'FireTap',
+      name: 'SmartFireX - Fire Detection System',
+      short_name: 'SmartFireX',
       description: 'Real-time fire and gas detection monitoring for ESP32 devices',
       theme_color: '#dc2626',
       background_color: '#fffaf0',

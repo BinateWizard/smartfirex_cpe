@@ -3,7 +3,7 @@
     <div class="install-content">
       <div class="install-icon">📱</div>
       <div class="install-text">
-        <div class="install-title">Install FireTap</div>
+        <div class="install-title">Install SmartFireX</div>
         <div class="install-description">Add to your home screen for quick access</div>
       </div>
       <div class="install-actions">

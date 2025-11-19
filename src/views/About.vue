@@ -5,7 +5,7 @@
       <button @click="goBack" class="back-btn">
         <ArrowLeft class="icon" />
       </button>
-      <h1 class="title">About FireTap</h1>
+      <h1 class="title">About SmartFireX</h1>
       <div class="spacer"></div>
     </div>
 
@@ -18,7 +18,7 @@
           System Overview
         </h2>
         <p class="section-text">
-          FireTap is a real-time fire and gas detection monitoring system designed for safety and early warning. 
+          SmartFireX is a real-time fire and gas detection monitoring system designed for safety and early warning. 
           The system uses ESP32 microcontrollers with environmental sensors to monitor smoke, gas, temperature, 
           and humidity levels. Data is transmitted to Firebase in real-time, allowing you to monitor multiple 
           locations from your mobile device.
@@ -203,7 +203,7 @@
           System Architecture
         </h2>
         <p class="section-text">
-          FireTap uses a dual-database architecture:
+          SmartFireX uses a dual-database architecture:
         </p>
         <div class="architecture-details">
           <div class="arch-item">
@@ -220,6 +220,90 @@
             <p>Built with Vue 3, can be installed on mobile devices for offline access and push notifications.</p>
           </div>
         </div>
+      </section>
+
+      <!-- Developer Documentation -->
+      <section class="section">
+        <h2 class="section-title">
+          <Database class="section-icon" />
+          Developer Documentation
+        </h2>
+
+        <h3 class="sub-title">Data Models</h3>
+        <p class="section-text">Canonical storage locations and example payloads.</p>
+
+        <div class="arch-item">
+          <strong>Realtime Database (RTDB) — /devices/{`{deviceId}`}</strong>
+          <pre class="code-block">{
+  "timestamp": 1699999999999,
+  "smokeLevel": 1800,
+  "smokeAnalog": 1800,
+  "temperature": 28.3,
+  "humidity": 54.1,
+  "gasStatus": "normal",
+  "message": "",
+  "status": { "state": "idle" },
+  "lastType": "alarm",
+  "sensorError": false,
+  "readings": {
+    "r1": { "timestamp": 1699999900000, "smokeLevel": 1000, "temperature": 27 }
+  }
+}</pre>
+          <p class="section-text">Notes: firmware may write <code>smokeLevel</code>, <code>smoke</code> or <code>smokeAnalog</code> — UI normalizes these names.</p>
+        </div>
+
+        <div class="arch-item">
+          <strong>Firestore — devices collection (document id: <code>{userId}_{deviceId}</code>)</strong>
+          <pre class="code-block">{
+  "deviceId": "DEVICE_001",
+  "name": "Market Device 1",
+  "coordinates": { "lat": 14.5995, "lng": 120.9842, "address": "Pasay, PH" },
+  "status": "Safe",
+  "addedBy": "userUid123",
+  "addedByEmail": "user@example.com",
+  "createdAt": "&lt;timestamp&gt;",
+  "updatedAt": "&lt;timestamp&gt;"
+}</pre>
+        </div>
+
+        <h3 class="sub-title">Alert Monitoring (background)</h3>
+        <p class="section-text">The app runs a background monitor (<code>src/services/alertMonitor.js</code>) that subscribes to the user's registered devices and triggers local UX actions on alert transitions:</p>
+        <ul class="condition-list">
+          <li>Play a WebAudio siren (WebAudio API)</li>
+          <li>Start continuous vibration via <code>navigator.vibrate()</code></li>
+          <li>Show a system Notification</li>
+        </ul>
+        <p class="section-text">Alert conditions include: <code>sensorError === true</code>, <code>message</code> values ('help requested' / 'alarm has been triggered'), <code>lastType === 'alarm'</code>, <code>gasStatus</code> is 'detected'/'critical', or smoke analog &gt; 1500.</p>
+
+        <h3 class="sub-title">Auth & Security (developer notes)</h3>
+        <p class="section-text">Authentication uses Firebase Google Auth. Device registrations use composite Firestore document IDs to isolate users: <code>{userId}_{deviceId}</code>.</p>
+        <p class="section-text">Recommended Firestore rule pattern (conceptual):</p>
+        <pre class="code-block">match /devices/{docId} {
+  allow read: if request.auth != null && docId.startsWith(request.auth.uid + '_');
+  allow create: if request.auth != null
+                && docId == request.auth.uid + '_' + request.resource.data.deviceId
+                && request.resource.data.addedBy == request.auth.uid;
+  allow update, delete: if request.auth != null && resource.data.addedBy == request.auth.uid;
+}</pre>
+
+        <h3 class="sub-title">How to add a new sensor field (end-to-end)</h3>
+        <ol class="step-list">
+          <li>Update ESP32 firmware to include the new field in the RTDB payload (e.g. <code>coLevel</code>).</li>
+          <li>Send a test payload to RTDB and verify in the console or <code>DeviceDebug</code> view.</li>
+          <li>Update <code>DeviceDetail.vue</code> to read and display the new field (add to <code>latest</code> mapping and charts if desired).</li>
+          <li>Optionally, store a summary in Firestore device doc for quick access.</li>
+          <li>Test on-device and through the UI; add unit/manual tests where appropriate.</li>
+        </ol>
+
+        <h3 class="sub-title">Testing Checklist</h3>
+        <ul class="condition-list">
+          <li>Verify RTDB payload arrives and keys are present.</li>
+          <li>Confirm <code>DeviceDetail</code> updates live when RTDB changes.</li>
+          <li>Trigger alert conditions and ensure monitor starts/stops (sound, vibration, notification).</li>
+          <li>Verify Add Device flow checks RTDB before creating Firestore registrations.</li>
+        </ul>
+
+        <p class="section-text">For full developer documentation, see the repository <code>DOCUMENTATION.md</code>.</p>
       </section>
 
       <!-- App Version -->
@@ -532,6 +616,31 @@ const goBack = () => {
   font-family: 'Courier New', monospace;
   font-size: 0.85rem;
   color: #dc2626;
+}
+
+/* Developer docs styles */
+.sub-title {
+  margin: 0.5rem 0 0.5rem 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.code-block {
+  background: #0f172a;
+  color: #e6edf3;
+  padding: 12px;
+  border-radius: 8px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', 'Courier New', monospace;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  margin: 0.75rem 0;
+}
+
+.step-list {
+  padding-left: 1.25rem;
+  color: #4b5563;
 }
 
 /* App Info */
