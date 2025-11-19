@@ -540,15 +540,15 @@ function determineStatus(data) {
   // Check lastType field
   if (data.lastType === 'alarm') return 'Alert';
   
-  // Check for critical gas status
-  if (data.gasStatus === 'critical' || data.gasStatus === 'detected') return 'Alert';
+  // Check for critical gas status - only if explicitly set to these values
+  if (data.gasStatus && (data.gasStatus === 'critical' || data.gasStatus === 'detected')) return 'Alert';
   
   // Check messages
   if (data.message === 'help requested' || data.message === 'alarm has been triggered') {
     return 'Alert';
   }
   
-  // Check smoke levels
+  // Check smoke levels - only if value exists and is high
   if (data.smokeLevel !== undefined || data.smoke !== undefined || data.smokeAnalog !== undefined) {
     const smokeValue = data.smokeLevel || data.smoke || data.smokeAnalog || 0;
     if (typeof smokeValue === 'number' && smokeValue > 1500) return 'Alert';

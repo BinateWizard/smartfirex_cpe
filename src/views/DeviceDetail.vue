@@ -117,15 +117,50 @@
       <!-- OVERVIEW TAB -->
       <div v-if="activeTab === 'overview'">
       <!-- Status Circle -->
-      <div class="status-section" v-if="latest && typeof latest === 'object' && latest.status">
-        <div class="status-circle" :class="{ 'alert-circle': latest.status === 'Alert' }">
+      <div class="status-section" v-if="latest">
+        <div class="status-circle" :class="{
+          'safe-circle': !hasFireCondition && !hasSprinklerActive && latest.status === 'Safe',
+          'help-circle': hasFireCondition,
+          'sprinkler-circle': hasSprinklerActive,
+          'alert-circle': latest.status === 'Alert' && !hasFireCondition && !hasSprinklerActive
+        }">
           <div class="status-icon-container">
-            <Bell class="status-bell-icon" />
+            <!-- Fire detected: Flame icon (smoke > threshold, gas detected, or alert button) -->
+            <Flame v-if="hasFireCondition" class="status-bell-icon" />
+            <!-- Sprinkler active (6s button): Droplets icon -->
+            <Droplets v-else-if="hasSprinklerActive" class="status-bell-icon" />
+            <!-- Safe: Check icon -->
+            <Check v-else-if="latest.status === 'Safe'" class="status-bell-icon" />
+            <!-- Other alerts: Bell icon -->
+            <Bell v-else class="status-bell-icon" />
           </div>
         </div>
-        <div class="status-label" :class="{ 'alert-label': latest.status === 'Alert' }">
-          {{ latest.status }}
+        <div class="status-label" :class="{
+          'safe-label': !hasFireCondition && !hasSprinklerActive && latest.status === 'Safe',
+          'help-label': hasFireCondition,
+          'sprinkler-label': hasSprinklerActive,
+          'alert-label': latest.status === 'Alert' && !hasFireCondition && !hasSprinklerActive
+        }">
+          <span v-if="hasSprinklerActive">Sprinkler Active</span>
+          <span v-else-if="hasFireCondition">Fire Detected</span>
+          <span v-else>{{ latest.status || 'Safe' }}</span>
         </div>
+      </div>
+
+      <!-- Fire Alert (smoke/gas/alarm detected) -->
+      <div v-if="hasFireCondition && !hasSprinklerActive" class="alert-banner">
+        🔥 <strong>Fire/Smoke Detected!</strong><br>
+        <span v-if="latest.buttonEvent === 'STATE_ALERT'">Emergency alert activated via button (3s hold).</span>
+        <span v-else-if="latest.gasStatus === 'detected' || latest.gasStatus === 'critical'">Critical gas levels detected.</span>
+        <span v-else-if="latest.lastType === 'alarm'">Alarm has been triggered by sensors.</span>
+        <span v-else>High smoke levels detected.</span>
+        Press button for ≤1s to reset or activate sprinkler (6s hold).
+      </div>
+
+      <!-- Sprinkler Active (6s press) -->
+      <div v-if="hasSprinklerActive" class="sprinkler-banner">
+        💦 <strong>Sprinkler System Active!</strong><br>
+        Sprinkler activated via button (6s hold). Press button for ≤1s to reset.
       </div>
 
       <!-- Sensor Error Warning -->
@@ -465,7 +500,9 @@ import {
   MapPin, 
   Check, 
   AlertTriangle,
-  ChevronLeft
+  ChevronLeft,
+  Flame,
+  Droplets
 } from 'lucide-vue-next'
 import {
   Chart,
@@ -579,6 +616,34 @@ const filteredHistory = computed(() => {
   }
   
   return history.value.filter(h => h.dateTime >= cutoffDate);
+});
+
+// Fire condition: high smoke, gas detected, alarm triggered, or alert button pressed
+const hasFireCondition = computed(() => {
+  if (!latest.value) return false;
+  
+  // Check for alert button (3s press)
+  if (latest.value.buttonEvent === 'STATE_ALERT') return true;
+  
+  // Check for high smoke levels (>1500 or >60%)
+  const smokeValue = latest.value.smokeLevel ?? latest.value.smoke ?? latest.value.smokeAnalog ?? 0;
+  if (typeof smokeValue === 'number' && smokeValue > 1500) return true;
+  
+  // Check for gas detection
+  const gasStatus = String(latest.value.gasStatus || '').toLowerCase();
+  if (gasStatus === 'detected' || gasStatus === 'critical') return true;
+  
+  // Check for alarm messages
+  if (latest.value.message === 'alarm has been triggered') return true;
+  if (latest.value.lastType === 'alarm') return true;
+  
+  return false;
+});
+
+// Sprinkler condition: 6s button press
+const hasSprinklerActive = computed(() => {
+  if (!latest.value) return false;
+  return latest.value.buttonEvent === 'STATE_SPRINKLER';
 });
 
 // Watch for timeRange changes and update charts
@@ -747,6 +812,49 @@ function getSmokeBadgeClass(percentage) {
   return 'smoke-low';
 }
 
+function determineStatusFromButton(data, buttonEvent) {
+  // Button event takes priority over sensor data
+  if (buttonEvent === 'STATE_ALERT') return 'Alert';
+  if (buttonEvent === 'STATE_SPRINKLER') return 'Safe'; // Sprinkler is active but not "alert"
+  
+  // Fall back to regular status determination
+  return determineStatus(data);
+}
+
+function determineStatus(data) {
+  if (!data || typeof data !== 'object') return 'Safe';
+
+  const toStr = (v) => String(v || '').toLowerCase();
+
+  // Hard alert conditions - only if explicitly set
+  if (data.sensorError === true) return 'Alert';
+  if (data.message === 'help requested' || data.message === 'alarm has been triggered') return 'Alert';
+  if (data.lastType === 'alarm') return 'Alert';
+  
+  // Only trigger alert for gas if it's explicitly detected/critical (not just missing data)
+  if (data.gasStatus && ['critical','detected'].includes(toStr(data.gasStatus))) return 'Alert';
+
+  // If status is a string, normalize only if it's a known label
+  if (typeof data.status === 'string') {
+    const s = toStr(data.status).trim();
+    if (s === 'alert' || s === 'unsafe') return 'Alert';
+    if (s === 'safe' || s === 'normal') return 'Safe';
+    // If it's JSON-like, try to parse and re-evaluate
+    if (s.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(data.status);
+        return determineStatus(parsed);
+      } catch (_) { /* ignore */ }
+    }
+  }
+
+  // Smoke threshold check - only if value exists and is high
+  const smokeValue = data.smokeLevel ?? data.smoke ?? data.smokeAnalog ?? 0;
+  if (typeof smokeValue === 'number' && smokeValue > 1500) return 'Alert';
+
+  return 'Safe';
+}
+
 async function fetchDeviceInfo() {
   try {
     const currentUser = auth.currentUser;
@@ -787,18 +895,52 @@ async function fetchData() {
       if (snapshot.exists()) {
         const data = snapshot.val();
         
+        // Strictly check for boolean true sensor error
+        const sensorErrorFlag = (data.sensorError === true);
+        const sprinklerActiveFlag = (data.sprinklerActive === true);
+        
+        // Read button state from status object (sibling to buttonEvents)
+        const buttonStatus = data.status || {};
+        const buttonState = buttonStatus.state || 'idle';
+        const lastEventType = buttonStatus.lastEventType || '';
+        const lastEventAt = buttonStatus.lastEventAt || '';
+        
+        // Map button state to buttonEvent format (for backward compatibility)
+        let buttonEventState = 'STATE_IDLE';
+        if (buttonState === 'alert') {
+          buttonEventState = 'STATE_ALERT';
+        } else if (buttonState === 'sprinkler') {
+          buttonEventState = 'STATE_SPRINKLER';
+        }
+        
+        // Map buttonEvent to display properties
+        let buttonMessage = '';
+        let isButtonAlert = false;
+        let isButtonSprinkler = false;
+        
+        if (buttonEventState === 'STATE_ALERT') {
+          buttonMessage = 'alert triggered';
+          isButtonAlert = true;
+        } else if (buttonEventState === 'STATE_SPRINKLER') {
+          buttonMessage = 'sprinkler activated';
+          isButtonSprinkler = true;
+        }
+        
         // Process current/latest data
         const currentData = {
           id: Date.now(),
-          dateTime: data.lastSeen ? new Date(data.lastSeen) : (data.timestamp ? new Date(data.timestamp) : new Date()),
+          dateTime: lastEventAt ? new Date(lastEventAt) : (data.lastSeen ? new Date(data.lastSeen) : (data.timestamp ? new Date(data.timestamp) : new Date())),
           smokeAnalog: data.smokeLevel || data.smoke || data.smokeAnalog || 0,
           gasStatus: data.gasStatus || 'normal',
           temperature: data.temperature,
           humidity: data.humidity,
-          message: data.message || (data.sensorError ? 'Sensor Error' : ''),
-          sensorError: data.sensorError || false,
+          message: buttonMessage || data.message || (sensorErrorFlag ? 'Sensor Error' : ''),
+          sensorError: sensorErrorFlag,
+          sprinklerActive: isButtonSprinkler || sprinklerActiveFlag,
+          buttonEvent: buttonEventState,
+          buttonState: buttonState, // Store raw state for debugging
           lastType: data.lastType,
-          status: determineStatus(data)
+          status: determineStatusFromButton(data, buttonEventState)
         };
         
         latest.value = currentData;
@@ -810,17 +952,20 @@ async function fetchData() {
         // Build history from readings if available
         if (data.readings && typeof data.readings === 'object') {
           const readingsArray = Object.entries(data.readings)
-            .map(([key, value]) => ({
-              id: key,
-              dateTime: value.lastSeen ? new Date(value.lastSeen) : (value.timestamp ? new Date(value.timestamp) : new Date()),
-              smokeAnalog: value.smokeLevel || value.smoke || value.smokeAnalog || 0,
-              gasStatus: value.gasStatus || 'normal',
-              temperature: value.temperature,
-              humidity: value.humidity,
-              message: value.message || (value.sensorError ? 'Sensor Error' : ''),
-              sensorError: value.sensorError || false,
-              status: determineStatus(value)
-            }))
+            .map(([key, value]) => {
+              const historySensorError = (value.sensorError === true);
+              return {
+                id: key,
+                dateTime: value.lastSeen ? new Date(value.lastSeen) : (value.timestamp ? new Date(value.timestamp) : new Date()),
+                smokeAnalog: value.smokeLevel || value.smoke || value.smokeAnalog || 0,
+                gasStatus: value.gasStatus || 'normal',
+                temperature: value.temperature,
+                humidity: value.humidity,
+                message: value.message || (historySensorError ? 'Sensor Error' : ''),
+                sensorError: historySensorError,
+                status: determineStatus(value)
+              };
+            })
             .sort((a, b) => b.dateTime - a.dateTime)
             .slice(0, 10);
           
@@ -851,38 +996,6 @@ async function fetchData() {
   } catch (error) {
     console.error("❌ Error setting up data listener:", error);
   }
-}
-
-function determineStatus(data) {
-  if (!data || typeof data !== 'object') return 'Safe';
-
-  const toStr = (v) => String(v || '').toLowerCase();
-
-  // Hard alert conditions
-  if (data.sensorError === true) return 'Alert';
-  if (data.message === 'help requested' || data.message === 'alarm has been triggered') return 'Alert';
-  if (data.lastType === 'alarm') return 'Alert';
-  if (['critical','detected','high'].includes(toStr(data.gasStatus))) return 'Alert';
-
-  // If status is a string, normalize only if it's a known label
-  if (typeof data.status === 'string') {
-    const s = toStr(data.status).trim();
-    if (s === 'alert' || s === 'unsafe') return 'Alert';
-    if (s === 'safe' || s === 'normal') return 'Safe';
-    // If it's JSON-like, try to parse and re-evaluate
-    if (s.startsWith('{')) {
-      try {
-        const parsed = JSON.parse(data.status);
-        return determineStatus(parsed);
-      } catch (_) { /* ignore */ }
-    }
-  }
-
-  // Smoke threshold check
-  const smokeValue = data.smokeLevel ?? data.smoke ?? data.smokeAnalog ?? 0;
-  if (typeof smokeValue === 'number' && smokeValue > 1500) return 'Alert';
-
-  return 'Safe';
 }
 
 onMounted(() => {
@@ -1269,6 +1382,34 @@ pre, code {
   line-height: 1.6;
 }
 
+.sprinkler-banner {
+  background: linear-gradient(135deg, #dbeafe 0%, #93c5fd 100%);
+  border: 2px solid #3b82f6;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 20px;
+  text-align: center;
+  color: #1e3a8a;
+  font-size: 14px;
+  line-height: 1.6;
+  animation: pulse-blue 2s ease-in-out infinite;
+}
+
+.sprinkler-banner strong {
+  font-size: 16px;
+  display: block;
+  margin-bottom: 4px;
+}
+
+@keyframes pulse-blue {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(59, 130, 246, 0);
+  }
+}
+
 .error-banner strong {
   font-size: 16px;
   display: block;
@@ -1295,6 +1436,19 @@ pre, code {
   position: relative;
 }
 
+.status-circle.safe-circle {
+  background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+}
+
+.status-circle.help-circle {
+  background: linear-gradient(135deg, #fed7aa 0%, #fdba74 100%);
+}
+
+.status-circle.sprinkler-circle {
+  background: linear-gradient(135deg, #dbeafe 0%, #93c5fd 100%);
+  animation: pulse-blue 2s ease-in-out infinite;
+}
+
 .status-circle.alert-circle {
   background: linear-gradient(135deg, #fee2e2 0%, #fca5a5 100%);
 }
@@ -1307,6 +1461,21 @@ pre, code {
   background-color: #22c55e;
   border-radius: 50%;
   box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3);
+}
+
+.status-circle.safe-circle::before {
+  background-color: #22c55e;
+  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3);
+}
+
+.status-circle.help-circle::before {
+  background-color: #f97316;
+  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.3);
+}
+
+.status-circle.sprinkler-circle::before {
+  background-color: #3b82f6;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
 }
 
 .status-circle.alert-circle::before {
@@ -1333,6 +1502,21 @@ pre, code {
   padding: 8px 24px;
   border-radius: 6px;
   letter-spacing: 1px;
+}
+
+.status-label.safe-label {
+  background-color: #bbf7d0;
+  color: #166534;
+}
+
+.status-label.help-label {
+  background-color: #fdba74;
+  color: #7c2d12;
+}
+
+.status-label.sprinkler-label {
+  background-color: #93c5fd;
+  color: #1e3a8a;
 }
 
 .status-label.alert-label {
@@ -2065,6 +2249,73 @@ pre, code {
 
 .action-btn-modal.danger:hover {
   background: #b91c1c;
+}
+
+/* History Metrics Badges */
+.history-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge.smoke-low {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.badge.smoke-med {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.badge.smoke-high {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.badge.temp {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.badge.humidity {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.badge.gas-normal {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.badge.gas-alert {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.badge.error {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.badge.help {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.badge.alarm {
+  background: #fee2e2;
+  color: #991b1b;
 }
 
 </style>

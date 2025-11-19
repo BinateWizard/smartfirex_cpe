@@ -61,10 +61,20 @@ let detachFns = []
 
 function determineStatus(data) {
   if (!data) return 'Safe'
+  
+  // Explicit alert conditions
+  if (data.sensorError === true) return 'Alert'
   if (data.message === 'help requested' || data.message === 'alarm has been triggered') return 'Alert'
-  const smokeValue = data.smokeLevel ?? data.smoke ?? 0
+  if (data.lastType === 'alarm') return 'Alert'
+  
+  // Gas status alerts - only if explicitly critical/detected
+  if (data.gasStatus && (data.gasStatus === 'critical' || data.gasStatus === 'detected')) return 'Alert'
+  
+  // Smoke threshold
+  const smokeValue = data.smokeLevel ?? data.smoke ?? data.smokeAnalog ?? 0
   if (typeof smokeValue === 'number' && smokeValue > 1500) return 'Alert'
-  if (data.status) return data.status
+  
+  // Don't trust status field from data - could be stringified JSON
   return 'Safe'
 }
 
