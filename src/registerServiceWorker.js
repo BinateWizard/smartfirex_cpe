@@ -22,7 +22,10 @@ if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'developme
     },
     updated () {
       console.log('🔄 New content is available; please refresh.')
-      // You can add a notification here to prompt user to refresh
+      // Auto-reload to show new version
+      if (confirm('New version available! Reload to update?')) {
+        window.location.reload()
+      }
     },
     offline () {
       console.log('📵 No internet connection found. App is running in offline mode.')
