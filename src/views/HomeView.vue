@@ -308,7 +308,11 @@
             @click="$router.push(`/device/${device.deviceId}`)"
           >
             <div class="device-icon" :class="getStatusClass(device.status)">
-              <Bell class="icon" />
+              <!-- Show different icons based on status and button state -->
+              <Flame v-if="device.status === 'Alert'" class="icon" />
+              <Droplets v-else-if="device.status === 'Sprinkler'" class="icon" />
+              <Check v-else-if="device.status === 'Safe'" class="icon" />
+              <Bell v-else class="icon" />
             </div>
             <div class="device-info">
               <div class="device-name">{{ device.name || device.deviceId }}</div>
@@ -336,7 +340,7 @@ import { useRouter } from "vue-router";
 import { collection, query, getDocs, where, doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
 import { ref as dbRef, onValue, get } from "firebase/database";
 import { db, rtdb, auth } from "@/firebase";
-import { Bell, MapPin, Plus, Inbox, Menu, X, Settings, HelpCircle, Info, Flame, User, LogOut, Printer, AlertTriangle } from 'lucide-vue-next';
+import { Bell, MapPin, Plus, Inbox, Menu, X, Settings, HelpCircle, Info, Flame, User, LogOut, Printer, AlertTriangle, Droplets, Check } from 'lucide-vue-next';
 import LocationPicker from '@/components/LocationPicker.vue';
 
 const router = useRouter();
@@ -500,10 +504,14 @@ async function fetchDevices() {
           const data = snapshot.val();
           const deviceIndex = devices.value.findIndex(d => d.id === device.id);
           if (deviceIndex !== -1) {
+            // Extract button state from RTDB structure
+            const buttonState = data.status?.state || 'idle';
+            
             // Extract status as a clean string
             devices.value[deviceIndex].status = determineStatus(data);
+            devices.value[deviceIndex].buttonState = buttonState; // Store button state
             // Use lastSeen or timestamp for update time
-            const timestamp = data.lastSeen || data.timestamp;
+            const timestamp = data.lastSeen || data.timestamp || data.status?.lastEventAt;
             devices.value[deviceIndex].updatedAt = timestamp ? new Date(timestamp) : new Date();
             // Store gas status for display
             devices.value[deviceIndex].gasStatus = data.gasStatus || 'normal';
@@ -533,6 +541,11 @@ async function fetchDevices() {
 function determineStatus(data) {
   // Always return a string, never an object
   if (!data || typeof data !== 'object') return 'Safe';
+  
+  // Check button state from new RTDB structure (status.state)
+  const buttonState = data.status?.state || 'idle';
+  if (buttonState === 'alert') return 'Alert';
+  if (buttonState === 'sprinkler') return 'Sprinkler';
   
   // Check for sensor error
   if (data.sensorError === true) return 'Alert';

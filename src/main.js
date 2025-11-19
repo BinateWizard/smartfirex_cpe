@@ -9,6 +9,9 @@ import "leaflet/dist/leaflet.css";
 import { auth } from './firebase'
 import { onAuthStateChanged } from 'firebase/auth'
 
+// Import background alert monitoring
+import './services/alertMonitor'
+
 // Create app instance once
 const app = createApp(App)
 
