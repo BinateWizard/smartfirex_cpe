@@ -4,7 +4,7 @@
       <div class="modal-icon">⏱️</div>
       <h3 class="modal-title">No Data Received</h3>
       <p class="modal-message">
-        The app has not received new data from this device for more than 10 seconds.
+        No new data received from this device for over 5 minutes.
       </p>
 
       <div class="diagnostic-block">

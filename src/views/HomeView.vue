@@ -311,13 +311,14 @@
             v-for="device in devices" 
             :key="device.id" 
             class="device-card"
-            @click="$router.push(`/device/${device.deviceId}`)"
+            @click="openDevice(device)"
           >
             <div class="device-icon" :class="getStatusClass(device.status)">
               <!-- Show different icons based on status and button state -->
               <Flame v-if="device.status === 'Alert'" class="icon" />
               <Droplets v-else-if="device.status === 'Sprinkler'" class="icon" />
               <Check v-else-if="device.status === 'Safe'" class="icon" />
+              <Bell v-else-if="device.status === 'Offline'" class="icon" />
               <Bell v-else class="icon" />
             </div>
             <div class="device-info">
@@ -362,6 +363,8 @@ const showLocationPicker = ref(false);
 const showInactivityModal = ref(false);
 const inactivityDeviceId = ref('');
 const offlineAck = ref({});
+const OFFLINE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+let offlineInterval = null;
 
 // User account info
 const userEmail = computed(() => auth.currentUser?.email || 'Unknown');
@@ -521,22 +524,20 @@ async function fetchDevices() {
             devices.value[deviceIndex].status = determineStatus(data);
             devices.value[deviceIndex].buttonState = buttonState; // Store button state
             // Use lastSeen or timestamp for update time
-            const timestamp = data.lastSeen || data.timestamp || data.status?.lastEventAt;
-            devices.value[deviceIndex].updatedAt = timestamp ? new Date(timestamp) : new Date();
+            const timestamp = data.lastSeen || data.timestamp || data.status?.lastEventAt || Date.now();
+            const tsDate = new Date(timestamp);
+            devices.value[deviceIndex].updatedAt = tsDate;
+            devices.value[deviceIndex].lastReceived = tsDate;
             // Store gas status for display
             devices.value[deviceIndex].gasStatus = data.gasStatus || 'normal';
             devices.value[deviceIndex].lastType = data.lastType || 'normal';
           }
         } else {
-          // Device not sending data (offline). Only trigger modal on transition.
+          // No RTDB node yet: mark offline immediately; lastReceived absent
           const deviceIndex = devices.value.findIndex(d => d.id === device.id);
           if (deviceIndex !== -1) {
-            const prevStatus = devices.value[deviceIndex].status;
             devices.value[deviceIndex].status = 'Offline';
-            if (prevStatus !== 'Offline' && !offlineAck.value[device.deviceId]) {
-              inactivityDeviceId.value = device.deviceId;
-              showInactivityModal.value = true;
-            }
+            devices.value[deviceIndex].lastReceived = null;
           }
         }
       });
@@ -703,10 +704,26 @@ async function handleAddDevice() {
 
 onMounted(() => {
   fetchDevices(); // Real-time listeners are set up inside
+  // Periodic offline reevaluation
+  offlineInterval = setInterval(() => {
+    const now = Date.now();
+    devices.value.forEach(d => {
+      const last = d.lastReceived ? d.lastReceived.getTime() : 0;
+      if (!last || (now - last) > OFFLINE_THRESHOLD_MS) {
+        if (d.status !== 'Offline') {
+          d.status = 'Offline';
+        }
+      }
+    });
+  }, 30000); // every 30s
 });
 
 onUnmounted(() => {
   // No timers to clear after refactor
+  if (offlineInterval) {
+    clearInterval(offlineInterval);
+    offlineInterval = null;
+  }
 });
 
 function handleOfflineAck() {
@@ -715,6 +732,22 @@ function handleOfflineAck() {
   }
   showInactivityModal.value = false;
   inactivityDeviceId.value = '';
+}
+
+function isDeviceOffline(device) {
+  if (device.status === 'Offline') return true;
+  const last = device.lastReceived ? device.lastReceived.getTime() : 0;
+  if (!last) return true; // never received
+  return (Date.now() - last) > OFFLINE_THRESHOLD_MS;
+}
+
+function openDevice(device) {
+  if (isDeviceOffline(device) && !offlineAck.value[device.deviceId]) {
+    inactivityDeviceId.value = device.deviceId;
+    showInactivityModal.value = true;
+    return;
+  }
+  router.push(`/device/${device.deviceId}`);
 }
 
 // Offline add state
