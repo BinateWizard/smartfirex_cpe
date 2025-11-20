@@ -52,7 +52,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { ChevronLeft, Check, AlertTriangle, Bell } from 'lucide-vue-next'
-import { collection, getDocs, doc, getDoc, query, where } from 'firebase/firestore'
+import { collection, getDocs, doc, getDoc, query, where, orderBy, limit } from 'firebase/firestore'
 import { ref as dbRef, onValue } from 'firebase/database'
 import { db, rtdb, auth } from '@/firebase'
 
@@ -179,6 +179,36 @@ async function buildListeners() {
   }
 
   loading.value = false
+  // Firestore persistent notifications (merge)
+  try {
+    const notifQ = query(
+      collection(db, 'notifications'),
+      where('userId', '==', currentUser.uid),
+      orderBy('createdAt', 'desc'),
+      limit(100)
+    );
+    const notifSnap = await getDocs(notifQ);
+    const existingIds = new Set(events.value.map(e => e.id));
+    notifSnap.forEach(d => {
+      const n = d.data();
+      const createdAt = n.createdAt?.toDate?.() || new Date();
+      const id = `fs-${d.id}`;
+      if (existingIds.has(id)) return;
+      events.value.push({
+        id,
+        deviceId: n.deviceId,
+        deviceName: n.deviceName || n.deviceId,
+        dateTime: createdAt,
+        temperature: n.temperature,
+        details: n.gasStatus ? { Gas: n.gasStatus } : null,
+        type: n.type === 'alert' ? 'alert' : (n.type === 'offline' ? 'alert' : n.type || 'safe'),
+        title: n.title || 'Notification'
+      });
+    });
+    events.value = events.value.sort((a,b) => b.dateTime - a.dateTime).slice(0, 200);
+  } catch (e) {
+    console.warn('Failed to load Firestore notifications', e);
+  }
 }
 
 onMounted(() => {

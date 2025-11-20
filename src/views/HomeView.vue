@@ -245,15 +245,15 @@
           <div class="modal-icon">⚠️</div>
           <h3 class="modal-title">Device Not Found</h3>
           <p class="modal-message">{{ errorModalMessage }}</p>
-          <button @click="showErrorModal = false" class="modal-btn">OK</button>
+          <button @click="handleErrorModalOk" class="modal-btn">OK</button>
         </div>
       </div>
     </transition>
 
     <InactivityModal
       v-model:show="showInactivityModal"
-      device-id="All devices"
-      @closed="handleInactivityClosed"
+      :device-id="inactivityDeviceId"
+      @closed="handleOfflineAck"
     />
 
     <!-- Location Picker Modal -->
@@ -343,7 +343,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from "vue";
 import { useRouter } from "vue-router";
-import { collection, query, getDocs, where, doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
+import { collection, query, getDocs, where, doc, setDoc, getDoc, serverTimestamp, addDoc } from "firebase/firestore";
 import { ref as dbRef, onValue, get } from "firebase/database";
 import { db, rtdb, auth } from "@/firebase";
 import { Bell, MapPin, Plus, Inbox, Menu, X, Settings, HelpCircle, Info, Flame, User, LogOut, Printer, AlertTriangle, Droplets, Check } from 'lucide-vue-next';
@@ -360,8 +360,8 @@ const showDeviceIdHelp = ref(false);
 const showAccountModal = ref(false);
 const showLocationPicker = ref(false);
 const showInactivityModal = ref(false);
-
-let inactivityTimeoutId = null;
+const inactivityDeviceId = ref('');
+const offlineAck = ref({});
 
 // User account info
 const userEmail = computed(() => auth.currentUser?.email || 'Unknown');
@@ -510,15 +510,6 @@ async function fetchDevices() {
     deviceList.forEach(device => {
       const deviceDataRef = dbRef(rtdb, `devices/${device.deviceId}`);
       onValue(deviceDataRef, (snapshot) => {
-        // Any live snapshot means we are still receiving data; reset inactivity timer
-        showInactivityModal.value = false;
-        if (inactivityTimeoutId) {
-          clearTimeout(inactivityTimeoutId);
-        }
-        inactivityTimeoutId = setTimeout(() => {
-          showInactivityModal.value = true;
-        }, 10000);
-
         if (snapshot.exists()) {
           const data = snapshot.val();
           const deviceIndex = devices.value.findIndex(d => d.id === device.id);
@@ -537,10 +528,15 @@ async function fetchDevices() {
             devices.value[deviceIndex].lastType = data.lastType || 'normal';
           }
         } else {
-          // Device not sending data yet
+          // Device not sending data (offline). Only trigger modal on transition.
           const deviceIndex = devices.value.findIndex(d => d.id === device.id);
           if (deviceIndex !== -1) {
+            const prevStatus = devices.value[deviceIndex].status;
             devices.value[deviceIndex].status = 'Offline';
+            if (prevStatus !== 'Offline' && !offlineAck.value[device.deviceId]) {
+              inactivityDeviceId.value = device.deviceId;
+              showInactivityModal.value = true;
+            }
           }
         }
       });
@@ -643,7 +639,10 @@ async function handleAddDevice() {
     const rtdbSnapshot = await get(rtdbDeviceRef);
     
     if (!rtdbSnapshot.exists()) {
-      errorModalMessage.value = `Device "${deviceId}" doesn't exist in active devices. Check if ESP32 is sending data.`;
+      // Defer creation until user acknowledges; mark for offline creation
+      errorModalMessage.value = `Device "${deviceId}" is not sending live data. You can still add it as Offline.`;
+      pendingOfflineDeviceId.value = deviceId;
+      pendingOfflineDeviceName.value = formData.value.name.trim() || deviceId;
       showErrorModal.value = true;
       isSubmitting.value = false;
       return;
@@ -707,19 +706,67 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  if (inactivityTimeoutId) {
-    clearTimeout(inactivityTimeoutId);
-    inactivityTimeoutId = null;
-  }
+  // No timers to clear after refactor
 });
 
-function handleInactivityClosed() {
-  if (inactivityTimeoutId) {
-    clearTimeout(inactivityTimeoutId);
+function handleOfflineAck() {
+  if (inactivityDeviceId.value) {
+    offlineAck.value[inactivityDeviceId.value] = true;
   }
-  inactivityTimeoutId = setTimeout(() => {
-    showInactivityModal.value = true;
-  }, 10000);
+  showInactivityModal.value = false;
+  inactivityDeviceId.value = '';
+}
+
+// Offline add state
+const pendingOfflineDeviceId = ref('');
+const pendingOfflineDeviceName = ref('');
+
+async function handleErrorModalOk() {
+  showErrorModal.value = false;
+  if (!pendingOfflineDeviceId.value) return;
+  try {
+    const currentUser = auth.currentUser;
+    if (!currentUser) return;
+    const docId = `${currentUser.uid}_${pendingOfflineDeviceId.value}`;
+    const userDeviceRef = doc(db, 'devices', docId);
+    const nowData = {
+      deviceId: pendingOfflineDeviceId.value,
+      name: pendingOfflineDeviceName.value,
+      location: formData.value.location.trim() || '',
+      description: formData.value.description.trim() || '',
+      status: 'Offline',
+      addedBy: currentUser.uid,
+      addedByEmail: currentUser.email || 'unknown',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    };
+    if (formData.value.coordinates) {
+      nowData.coordinates = {
+        lat: formData.value.coordinates.lat,
+        lng: formData.value.coordinates.lng
+      };
+    }
+    await setDoc(userDeviceRef, nowData);
+    // Create notification document
+    await addDoc(collection(db, 'notifications'), {
+      userId: currentUser.uid,
+      deviceId: pendingOfflineDeviceId.value,
+      deviceName: pendingOfflineDeviceName.value,
+      type: 'offline',
+      title: 'Device Added Offline',
+      message: 'Device registered without live data.',
+      createdAt: serverTimestamp(),
+      read: false
+    });
+    // Reset pending state & form
+    pendingOfflineDeviceId.value = '';
+    pendingOfflineDeviceName.value = '';
+    formData.value = { deviceId: '', name: '', location: '', description: '', coordinates: null };
+    // Navigate to notifications view
+    router.push('/notifications');
+  } catch (e) {
+    console.error('Failed to add offline device:', e);
+  }
 }
 </script>
 
